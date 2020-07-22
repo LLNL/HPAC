@@ -152,6 +152,12 @@ struct PragmaFPHandler : public PragmaHandler {
                     Token &FirstToken) override;
 };
 
+struct PragmaApproxHandler : public PragmaHandler {
+  PragmaApproxHandler() : PragmaHandler("approx") {}
+  void HandlePragma ( Preprocessor &PP, PragmaIntroducer Introducer,
+                      Token &FirstToken) override;
+};
+
 struct PragmaNoOpenMPHandler : public PragmaHandler {
   PragmaNoOpenMPHandler() : PragmaHandler("omp") { }
   void HandlePragma(Preprocessor &PP, PragmaIntroducer Introducer,
@@ -336,6 +342,11 @@ void Parser::initializePragmaHandlers() {
     OpenMPHandler = std::make_unique<PragmaNoOpenMPHandler>();
   PP.AddPragmaHandler(OpenMPHandler.get());
 
+///Adding pragma handler for approximate pragmas
+  ApproxHandler = std::make_unique<PragmaApproxHandler>();
+  PP.AddPragmaHandler(ApproxHandler.get());
+
+
   if (getLangOpts().MicrosoftExt ||
       getTargetInfo().getTriple().isOSBinFormatELF()) {
     MSCommentHandler = std::make_unique<PragmaCommentHandler>(Actions);
@@ -438,6 +449,9 @@ void Parser::resetPragmaHandlers() {
   }
   PP.RemovePragmaHandler(OpenMPHandler.get());
   OpenMPHandler.reset();
+
+  PP.RemovePragmaHandler(ApproxHandler.get());
+  ApproxHandler.reset();
 
   if (getLangOpts().MicrosoftExt ||
       getTargetInfo().getTriple().isOSBinFormatELF()) {
@@ -2258,6 +2272,38 @@ void PragmaNoOpenMPHandler::HandlePragma(Preprocessor &PP,
                                     diag::Severity::Ignored, SourceLocation());
   }
   PP.DiscardUntilEndOfDirective();
+}
+
+/// This is a handler for the approximate pragmas.
+/// if we follow the openMP example we should also
+/// create a handler in the case we want to ignore
+/// pragmas
+
+void PragmaApproxHandler::HandlePragma(Preprocessor &PP,
+                                      PragmaIntroducer Introducer,
+                                      Token &FirstToken){
+  SmallVector<Token, 16 > PragmaToken;
+  Token Tok;
+  Tok.startToken();
+  Tok.setLocation(Introducer.Loc);
+  Tok.setKind(tok::annot_pragma_approx_start);
+
+  while (Tok.isNot(tok::eod)){
+    PragmaToken.push_back(Tok);
+    PP.Lex(Tok);
+    /// I am just pushing tokens in the vector
+    /// These are going to be handled later.
+  }
+
+  SourceLocation Loc = Tok.getLocation();
+  Tok.startToken();
+  Tok.setKind(tok::annot_pragma_approx_end);
+  Tok.setLocation(Loc);
+  PragmaToken.push_back(Tok);
+
+  auto TokenArray = std::make_unique<Token[]>(PragmaToken.size());
+  std::copy(PragmaToken.begin(), PragmaToken.end(), TokenArray.get());
+  PP.EnterTokenStream(std::move(TokenArray), PragmaToken.size(), false, false);
 }
 
 /// Handle '#pragma omp ...' when OpenMP is enabled.

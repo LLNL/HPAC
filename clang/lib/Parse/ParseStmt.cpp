@@ -388,6 +388,11 @@ Retry:
     ProhibitAttributes(Attrs);
     return ParseOpenMPDeclarativeOrExecutableDirective(StmtCtx);
 
+  case tok::annot_pragma_approx_start:
+    ProhibitAttributes(Attrs);
+    HandleApproximate();
+    return StmtEmpty();
+
   case tok::annot_pragma_ms_pointers_to_members:
     ProhibitAttributes(Attrs);
     HandlePragmaMSPointersToMembers();

@@ -1217,6 +1217,12 @@ def err_opencl_logical_exclusive_or : Error<
 def err_openclcxx_virtual_function : Error<
   "virtual functions are not supported in C++ for OpenCL">;
 
+// Approx support.
+def err_pragma_approx_expected_directive : Error<
+  "unexpected end of pragma">;
+def err_pragma_approx_unrecognized_directive: Error<
+  "unrecognized directive in approx pragma">;
+
 // OpenMP support.
 def warn_pragma_omp_ignored : Warning<
   "unexpected '#pragma omp ...' in program">, InGroup<SourceUsesOpenMP>, DefaultIgnore;
