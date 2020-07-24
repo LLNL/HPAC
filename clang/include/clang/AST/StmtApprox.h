@@ -27,11 +27,14 @@ class ApproxDirective : public Stmt {
   /// Ending location of the directive.
   SourceLocation EndLoc;
 
+  /// Associated captured Stmt
+  Stmt *AssociatedStmt;
+
 protected:
   ApproxDirective(StmtClass SC) : Stmt(SC) {}
 
 public:
-  static ApproxDirective *Create(ASTContext &C);
+  static ApproxDirective *Create(ASTContext &C, Stmt *AssociatedStmt);
   /// Returns starting location of directive kind.
   SourceLocation getBeginLoc() const { return StartLoc; }
   /// Returns ending location of directive.
@@ -55,6 +58,10 @@ public:
   const_child_range children() const {
     return const_child_range(const_child_iterator(), const_child_iterator());
   }
+
+  void setAssociatedStmt(Stmt *S) { AssociatedStmt = S; }
+
+  Stmt *getAssociatedStmt() const { return AssociatedStmt; }
 
   static bool classof(const Stmt *S) {
     return S->getStmtClass() == ApproxDirectiveClass;

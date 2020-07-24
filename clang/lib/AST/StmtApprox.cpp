@@ -16,11 +16,13 @@
 using namespace clang;
 using namespace llvm;
 
-ApproxDirective *ApproxDirective::Create(ASTContext &C) {
+ApproxDirective *ApproxDirective::Create(ASTContext &C, Stmt *AssociatedStmt) {
   // TODO: what should be the alignof value?
   unsigned Size = llvm::alignTo(sizeof(ApproxDirective), alignof(void *));
   void *Mem = C.Allocate(Size + sizeof(Stmt *));
   ApproxDirective *AD = new (Mem) ApproxDirective(ApproxDirectiveClass);
+
+  AD->setAssociatedStmt(AssociatedStmt);
 
   return AD;
 }

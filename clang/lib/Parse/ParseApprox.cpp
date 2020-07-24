@@ -68,9 +68,13 @@ StmtResult Parser::ParseApproxDirective(ParsedStmtContext StmtCtx) {
     }
   }
 
-  Directive = Actions.ActOnApproxDirective();
   /// We need to consume also annot_pragma_approx_end
-  ConsumeAnyToken();
+  ConsumeAnnotationToken();
+
+  Actions.ActOnCapturedRegionStart(Tok.getEndLoc(), getCurScope(), CR_Default, /* NumParams = */1);
+  StmtResult AssociatedStmt = (Sema::CompoundScopeRAII(Actions), ParseStatement());
+  AssociatedStmt = Actions.ActOnCapturedRegionEnd(AssociatedStmt.get());
+  Directive = Actions.ActOnApproxDirective(AssociatedStmt.get());
 
   return Directive;
 }

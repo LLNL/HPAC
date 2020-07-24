@@ -18,6 +18,9 @@
 using namespace clang;
 using namespace approx;
 
-StmtResult Sema::ActOnApproxDirective() {
-  return ApproxDirective::Create(Context);
+StmtResult Sema::ActOnApproxDirective(Stmt *AssociatedStmt) {
+  if(!AssociatedStmt)
+    return StmtError();
+
+  return ApproxDirective::Create(Context, AssociatedStmt);
 }
