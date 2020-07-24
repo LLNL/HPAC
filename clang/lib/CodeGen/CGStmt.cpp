@@ -412,6 +412,8 @@ void CodeGenFunction::EmitStmt(const Stmt *S, ArrayRef<const Attr *> Attrs) {
     break;
   case Stmt::OMPGenericLoopDirectiveClass:
     EmitOMPGenericLoopDirective(cast<OMPGenericLoopDirective>(*S));
+  case Stmt::ApproxDirectiveClass:
+    EmitApproxDirective(cast<ApproxDirective>(*S));
     break;
   case Stmt::OMPTeamsGenericLoopDirectiveClass:
     llvm_unreachable("teams loop directive not supported yet.");
