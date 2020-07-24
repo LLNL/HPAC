@@ -10198,7 +10198,7 @@ public:
   static int getOpenMPCaptureLevels(OpenMPDirectiveKind Kind);
 
   /// Called after parsing the '\#pragma approx' directive.
-  StmtResult ActOnApproxDirective();
+  StmtResult ActOnApproxDirective(Stmt *AssociatedStmt);
 
   /// Initialization of captured region for OpenMP region.
   void ActOnOpenMPRegionStart(OpenMPDirectiveKind DKind, Scope *CurScope);
