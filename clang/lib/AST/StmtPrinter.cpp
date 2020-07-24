@@ -27,6 +27,7 @@
 #include "clang/AST/OpenMPClause.h"
 #include "clang/AST/PrettyPrinter.h"
 #include "clang/AST/Stmt.h"
+#include "clang/AST/StmtApprox.h"
 #include "clang/AST/StmtCXX.h"
 #include "clang/AST/StmtObjC.h"
 #include "clang/AST/StmtOpenMP.h"
@@ -630,6 +631,14 @@ void StmtPrinter::VisitSEHFinallyStmt(SEHFinallyStmt *Node) {
 void StmtPrinter::VisitSEHLeaveStmt(SEHLeaveStmt *Node) {
   Indent() << "__leave;";
   if (Policy.IncludeNewlines) OS << NL;
+}
+
+//===----------------------------------------------------------------------===//
+//  Approx directives printing methods
+//===----------------------------------------------------------------------===//
+void StmtPrinter::VisitApproxDirective(ApproxDirective *Node) {
+  Indent() << "#pragma approx";
+  // TODO: add clauses
 }
 
 //===----------------------------------------------------------------------===//

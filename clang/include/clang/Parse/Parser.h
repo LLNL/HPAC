@@ -3201,7 +3201,7 @@ private:
   /// Parses approximate pragmas
   /// it processes entire pragma line at once
   // We will work on changing that.
-  void HandleApproximate();
+  StmtResult ParseApproxDirective(ParsedStmtContext StmtCtx);
 
 public:
   /// Parses simple expression in parens for single-expression clauses of OpenMP

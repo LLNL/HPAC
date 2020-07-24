@@ -10197,6 +10197,9 @@ public:
   /// Return the number of captured regions created for an OpenMP directive.
   static int getOpenMPCaptureLevels(OpenMPDirectiveKind Kind);
 
+  /// Called after parsing the '\#pragma approx' directive.
+  StmtResult ActOnApproxDirective();
+
   /// Initialization of captured region for OpenMP region.
   void ActOnOpenMPRegionStart(OpenMPDirectiveKind DKind, Scope *CurScope);
   /// End of OpenMP region.

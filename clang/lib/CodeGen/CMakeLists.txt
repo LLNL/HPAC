@@ -74,6 +74,7 @@ add_clang_library(clangCodeGen
   CGOpenMPRuntimeNVPTX.cpp
   CGRecordLayoutBuilder.cpp
   CGStmt.cpp
+  CGStmtApprox.cpp
   CGStmtOpenMP.cpp
   CGVTT.cpp
   CGVTables.cpp

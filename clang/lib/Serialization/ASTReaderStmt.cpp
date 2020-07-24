@@ -30,6 +30,7 @@
 #include "clang/AST/OpenMPClause.h"
 #include "clang/AST/OperationKinds.h"
 #include "clang/AST/Stmt.h"
+#include "clang/AST/StmtApprox.h"
 #include "clang/AST/StmtCXX.h"
 #include "clang/AST/StmtObjC.h"
 #include "clang/AST/StmtOpenMP.h"
@@ -2247,6 +2248,16 @@ void ASTStmtReader::VisitAsTypeExpr(AsTypeExpr *E) {
   E->BuiltinLoc = readSourceLocation();
   E->RParenLoc = readSourceLocation();
   E->SrcExpr = Record.readSubExpr();
+}
+
+//===----------------------------------------------------------------------===//
+// Approx Directives.
+//===----------------------------------------------------------------------===//
+
+void ASTStmtReader::VisitApproxDirective(ApproxDirective *E) {
+  E->setLocStart(readSourceLocation());
+  E->setLocEnd(readSourceLocation());
+  // TODO: add clauses
 }
 
 //===----------------------------------------------------------------------===//

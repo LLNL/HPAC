@@ -2568,7 +2568,11 @@ enum CXCursorKind {
    */
   CXCursor_OMPScanDirective = 287,
 
-  CXCursor_LastStmt = CXCursor_OMPScanDirective,
+  /** Approx directive.
+   */
+  CXCursor_ApproxDirective = 288,
+
+  CXCursor_LastStmt = CXCursor_ApproxDirective,
 
   /**
    * Cursor that represents the translation unit itself.

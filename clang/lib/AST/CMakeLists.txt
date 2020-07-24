@@ -97,6 +97,7 @@ add_clang_library(clangAST
   ScanfFormatString.cpp
   SelectorLocationsKind.cpp
   Stmt.cpp
+  StmtApprox.cpp
   StmtCXX.cpp
   StmtIterator.cpp
   StmtObjC.cpp
