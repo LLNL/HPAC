@@ -10,10 +10,11 @@
 ///
 //===----------------------------------------------------------------------===//
 
+#include "clang/AST/ApproxClause.h"
 #include "clang/Basic/Approx.h"
 #include "clang/Parse/ParseDiagnostic.h"
 #include "clang/Parse/Parser.h"
-
+#include "clang/Parse/RAIIObjectsForParser.h"
 #include "llvm/Support/Debug.h"
 
 #include <iostream>
@@ -22,13 +23,123 @@ using namespace clang;
 using namespace llvm;
 using namespace approx;
 
-const std::string DirectiveInfo::Name[DK_END] = {"perfo", "memo", "dt", "nn"};
 
-bool isApproxDirective(Token &Tok, DirectiveApproxKind &Kind) {
-  for (unsigned i = DK_START; i < DK_END; i++) {
-    enum DirectiveApproxKind DK = (enum DirectiveApproxKind)i;
-    if (Tok.getIdentifierInfo()->getName().equals(DirectiveInfo::Name[DK])) {
-      Kind = DK;
+bool Parser::ParseApproxVarList(SmallVectorImpl<Expr *> &Vars,
+                                SourceLocation &ELoc) {
+  BalancedDelimiterTracker T(*this, tok::l_paren, tok::annot_pragma_approx_end);
+  if (T.expectAndConsume(diag::err_expected_lparen_after))
+    return true;
+
+  while (Tok.isNot(tok::r_paren) && Tok.isNot(tok::colon) &&
+         Tok.isNot(tok::annot_pragma_approx_end)) {
+    ExprResult VarExpr =
+        Actions.CorrectDelayedTyposInExpr(ParseAssignmentExpression());
+    if (VarExpr.isUsable()) {
+      Vars.push_back(VarExpr.get());
+    } else {
+      SkipUntil(tok::comma, tok::r_paren, tok::annot_pragma_approx_end,
+                StopBeforeMatch);
+      return false;
+    }
+    bool isComma = Tok.is(tok::comma);
+    if (isComma)
+      ConsumeToken();
+    else if (Tok.isNot(tok::r_paren) &&
+             Tok.isNot(tok::annot_pragma_approx_end) && Tok.isNot(tok::colon)) {
+      Diag(Tok, diag::err_pragma_approx_expected_punc);
+      SkipUntil(tok::annot_pragma_approx_end, StopBeforeMatch);
+      return false;
+    }
+  }
+  ELoc = Tok.getLocation();
+  if (!T.consumeClose())
+    ELoc = T.getCloseLocation();
+  return true;
+}
+
+ApproxClause *Parser::ParseApproxPerfoClause(ClauseKind CK) {
+  SourceLocation Loc = Tok.getLocation();
+  SourceLocation ELoc = ConsumeAnyToken();
+  ApproxVarListLocTy Locs(Loc, SourceLocation(), ELoc);
+  return Actions.ActOnApproxPerfoClause(CK, Locs);
+}
+
+ApproxClause *Parser::ParseApproxMemoClause(ClauseKind CK) {
+  SourceLocation Loc = Tok.getLocation();
+  SourceLocation ELoc = ConsumeAnyToken();
+  ApproxVarListLocTy Locs(Loc, SourceLocation(), ELoc);
+  return Actions.ActOnApproxMemoClause(CK, Locs);
+}
+
+ApproxClause *Parser::ParseApproxDTClause(ClauseKind CK) {
+  SourceLocation Loc = Tok.getLocation();
+  SourceLocation ELoc = ConsumeAnyToken();
+  ApproxVarListLocTy Locs(Loc, SourceLocation(), ELoc);
+  return Actions.ActOnApproxDTClause(CK, Locs);
+}
+
+ApproxClause *Parser::ParseApproxNNClause(ClauseKind CK) {
+  SourceLocation Loc = Tok.getLocation();
+  SourceLocation ELoc = ConsumeAnyToken();
+  ApproxVarListLocTy Locs(Loc, SourceLocation(), ELoc);
+  return Actions.ActOnApproxNNClause(CK, Locs);
+}
+
+ApproxClause *Parser::ParseApproxUserClause(ClauseKind CK) {
+  SourceLocation Loc = Tok.getLocation();
+  SourceLocation ELoc = ConsumeAnyToken();
+  ApproxVarListLocTy Locs(Loc, SourceLocation(), ELoc);
+  return Actions.ActOnApproxUserClause(CK, Locs);
+}
+
+ApproxClause *Parser::ParseApproxIfClause(ClauseKind CK) {
+  SourceLocation Loc = Tok.getLocation();
+  SourceLocation ELoc = ConsumeAnyToken();
+  ApproxVarListLocTy Locs(Loc, SourceLocation(), ELoc);
+  return Actions.ActOnApproxIfClause(CK, Locs);
+}
+
+ApproxClause *Parser::ParseApproxInClause(ClauseKind CK) {
+  SourceLocation Loc = Tok.getLocation();
+  SourceLocation LOpen = ConsumeAnyToken();
+  SourceLocation RLoc;
+  SmallVector<Expr *, 8> Vars;
+  if (!ParseApproxVarList(Vars, RLoc)) {
+    return nullptr;
+  }
+  ApproxVarListLocTy Locs(Loc, LOpen, RLoc);
+  return Actions.ActOnApproxVarList(CK, Vars, Locs);
+}
+
+ApproxClause *Parser::ParseApproxOutClause(ClauseKind CK) {
+  SourceLocation Loc = Tok.getLocation();
+  SourceLocation LOpen = ConsumeAnyToken();
+  SourceLocation RLoc;
+  SmallVector<Expr *, 8> Vars;
+  if (!ParseApproxVarList(Vars, RLoc)) {
+    return nullptr;
+  }
+  ApproxVarListLocTy Locs(Loc, LOpen, RLoc);
+  return Actions.ActOnApproxVarList(CK, Vars, Locs);
+}
+
+ApproxClause *Parser::ParseApproxInOutClause(ClauseKind CK) {
+  SourceLocation Loc = Tok.getLocation();
+  SourceLocation LOpen = ConsumeAnyToken();
+  SourceLocation RLoc;
+  SmallVector<Expr *, 8> Vars;
+  if (!ParseApproxVarList(Vars, RLoc)) {
+    return nullptr;
+  }
+  ApproxVarListLocTy Locs(Loc, LOpen, RLoc);
+  return Actions.ActOnApproxVarList(CK, Vars, Locs);
+}
+
+bool isApproxClause(Token &Tok, ClauseKind &Kind) {
+  for (unsigned i = CK_START; i < CK_END; i++) {
+    enum ClauseKind CK = (enum ClauseKind)i;
+    if (Tok.getIdentifierInfo()->getName().equals(ApproxClause::Name[CK])) {
+      Kind = CK;
       return true;
     }
   }
@@ -38,14 +149,18 @@ bool isApproxDirective(Token &Tok, DirectiveApproxKind &Kind) {
 StmtResult Parser::ParseApproxDirective(ParsedStmtContext StmtCtx) {
   assert(Tok.is(tok::annot_pragma_approx_start));
 
-  StmtResult Directive = StmtError();
+#define PARSER_CALL(method) ((*this).*(method))
 
-  DirectiveApproxKind DK;
+  StmtResult Directive = StmtError();
+  SourceLocation DirectiveStart = Tok.getLocation();
+  SmallVector<ApproxClause*, CK_END> Clauses;
 
   /// I am consuming the pragma identifier atm.
   ConsumeAnyToken();
 
-  /// A.T.M we do not support just
+  SourceLocation ClauseStartLocation = Tok.getLocation();
+
+  /// we do not support just
   /// #pragma approx
   /// we need extra information. So just
   /// return with an error
@@ -55,26 +170,30 @@ StmtResult Parser::ParseApproxDirective(ParsedStmtContext StmtCtx) {
     return Directive;
   }
 
+  ClauseKind CK;
   while (Tok.isNot(tok::annot_pragma_approx_end)) {
-    if (!Tok.isNot(tok::identifier)) {
-      if (isApproxDirective(Tok, DK)) {
-        dbgs() << "Identified directive: " << DirectiveInfo::Name[DK] << "\n";
-      } else {
-        PP.Diag(Tok, diag::err_pragma_approx_unrecognized_directive);
+    if (Tok.is(tok::identifier) && isApproxClause(Tok, CK)) {
+      ApproxClause *Clause = PARSER_CALL(ParseApproxClause[CK])(CK);
+      if (!Clause) {
         SkipUntil(tok::annot_pragma_approx_end);
         return Directive;
       }
-      ConsumeAnyToken();
+      Clauses.push_back(Clause);
+    } else {
+      PP.Diag(Tok, diag::err_pragma_approx_unrecognized_directive);
+      SkipUntil(tok::annot_pragma_approx_end);
+      return Directive;
     }
   }
 
-  /// We need to consume also annot_pragma_approx_end
+  /// Update the end location of the directive.
+  SourceLocation DirectiveEnd = Tok.getLocation();
   ConsumeAnnotationToken();
+  ApproxVarListLocTy Locs(DirectiveStart, ClauseStartLocation, DirectiveEnd);
 
   Actions.ActOnCapturedRegionStart(Tok.getEndLoc(), getCurScope(), CR_Default, /* NumParams = */1);
   StmtResult AssociatedStmt = (Sema::CompoundScopeRAII(Actions), ParseStatement());
   AssociatedStmt = Actions.ActOnCapturedRegionEnd(AssociatedStmt.get());
-  Directive = Actions.ActOnApproxDirective(AssociatedStmt.get());
-
+  Directive = Actions.ActOnApproxDirective(AssociatedStmt.get(), Clauses, Locs);
   return Directive;
 }

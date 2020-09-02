@@ -14,7 +14,9 @@
 #define LLVM_CLANG_AST_STMTAPPROX_H
 
 #include "clang/AST/Expr.h"
+#include "clang/AST/ApproxClause.h"
 #include "clang/AST/Stmt.h"
+#include "clang/Basic/Approx.h"
 #include "clang/Basic/SourceLocation.h"
 
 namespace clang {
@@ -27,14 +29,29 @@ class ApproxDirective : public Stmt {
   /// Ending location of the directive.
   SourceLocation EndLoc;
 
+  const unsigned NumClauses;
   /// Associated captured Stmt
   Stmt *AssociatedStmt;
 
-protected:
-  ApproxDirective(StmtClass SC) : Stmt(SC) {}
+  const unsigned ClausesOffset;
 
+  MutableArrayRef<ApproxClause*> getClauses(){
+    ApproxClause **ClauseStorage = reinterpret_cast<ApproxClause **>(
+      reinterpret_cast<char *>(this) + ClausesOffset);
+      return MutableArrayRef<ApproxClause *> (ClauseStorage, NumClauses);
+  }
+
+protected:
+  ApproxDirective(StmtClass SC,
+                         SourceLocation StartLoc, SourceLocation EndLoc,
+                         unsigned NumClauses)
+      : Stmt(SC), StartLoc(std::move(StartLoc)),
+        EndLoc(std::move(EndLoc)), NumClauses(NumClauses),
+        ClausesOffset(llvm::alignTo(sizeof(ApproxDirective), alignof(ApproxClause*))) {}
 public:
-  static ApproxDirective *Create(ASTContext &C, Stmt *AssociatedStmt);
+  static ApproxDirective *Create(const ASTContext &C, SourceLocation StartLoc,
+                                SourceLocation EndLoc, Stmt *AssociatedStmt,
+                                ArrayRef<ApproxClause *> Clauses);
   /// Returns starting location of directive kind.
   SourceLocation getBeginLoc() const { return StartLoc; }
   /// Returns ending location of directive.
@@ -51,6 +68,14 @@ public:
   ///
   void setLocEnd(SourceLocation Loc) { EndLoc = Loc; }
 
+
+  unsigned getNumClauses() const { return NumClauses; }
+
+  unsigned getClausesOffset() const { return ClausesOffset; }
+
+
+  ApproxClause *getClause(unsigned i) const { return clauses()[i]; }
+
   child_range children() {
     return child_range(child_iterator(), child_iterator());
   }
@@ -66,6 +91,15 @@ public:
   static bool classof(const Stmt *S) {
     return S->getStmtClass() == ApproxDirectiveClass;
   }
+
+  ArrayRef<ApproxClause *> clauses() { return getClauses(); }
+
+  ArrayRef<ApproxClause *> clauses() const {
+    return const_cast<ApproxDirective*>(this)->getClauses();
+  }
+
+  void setClauses(ArrayRef<ApproxClause*> Clauses);
+
 };
 
 } // end namespace clang

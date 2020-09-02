@@ -10,19 +10,35 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "clang/AST/ApproxClause.h"
 #include "clang/AST/StmtApprox.h"
 #include "clang/AST/ASTContext.h"
+#include "clang/Basic/Approx.h"
+#include "llvm/Support/Debug.h"
 
 using namespace clang;
 using namespace llvm;
 
-ApproxDirective *ApproxDirective::Create(ASTContext &C, Stmt *AssociatedStmt) {
-  // TODO: what should be the alignof value?
-  unsigned Size = llvm::alignTo(sizeof(ApproxDirective), alignof(void *));
-  void *Mem = C.Allocate(Size + sizeof(Stmt *));
-  ApproxDirective *AD = new (Mem) ApproxDirective(ApproxDirectiveClass);
 
+void ApproxDirective::setClauses(ArrayRef<ApproxClause *> Clauses) {
+  assert(
+      Clauses.size() == getNumClauses() &&
+      "Approx:: Number of clauses is not the same as the preallocated buffer");
+  std::copy(Clauses.begin(), Clauses.end(), getClauses().begin());
+}
+
+ApproxDirective *ApproxDirective::Create(const ASTContext &C,
+                                         SourceLocation StartLoc,
+                                         SourceLocation EndLoc,
+                                         Stmt *AssociatedStmt,
+                                         ArrayRef<ApproxClause *> Clauses) {
+  unsigned Size =
+      llvm::alignTo(sizeof(ApproxDirective), alignof(ApproxClause *));
+  void *Mem = C.Allocate(Size + sizeof(ApproxClause *) * Clauses.size() +
+                         sizeof(Stmt *));
+  ApproxDirective *AD = new (Mem)
+      ApproxDirective(ApproxDirectiveClass, StartLoc, EndLoc, Clauses.size());
+  AD->setClauses(Clauses);
   AD->setAssociatedStmt(AssociatedStmt);
-
   return AD;
 }
