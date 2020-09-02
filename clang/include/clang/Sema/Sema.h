@@ -14,6 +14,7 @@
 #ifndef LLVM_CLANG_SEMA_SEMA_H
 #define LLVM_CLANG_SEMA_SEMA_H
 
+#include "clang/AST/ApproxClause.h"
 #include "clang/AST/ASTConcept.h"
 #include "clang/AST/ASTFwd.h"
 #include "clang/AST/Attr.h"
@@ -34,6 +35,7 @@
 #include "clang/AST/StmtCXX.h"
 #include "clang/AST/TypeLoc.h"
 #include "clang/AST/TypeOrdering.h"
+#include "clang/Basic/Approx.h"
 #include "clang/Basic/BitmaskEnum.h"
 #include "clang/Basic/ExpressionTraits.h"
 #include "clang/Basic/Module.h"
@@ -10198,7 +10200,15 @@ public:
   static int getOpenMPCaptureLevels(OpenMPDirectiveKind Kind);
 
   /// Called after parsing the '\#pragma approx' directive.
-  StmtResult ActOnApproxDirective(Stmt *AssociatedStmt);
+  StmtResult ActOnApproxDirective(Stmt *AssociatedStmt, ArrayRef<ApproxClause *> Clauses, approx::ApproxVarListLocTy &Locs);
+  //Called to process each approx clause respectively
+  ApproxClause* ActOnApproxPerfoClause(approx::ClauseKind Kind, approx::ApproxVarListLocTy &Locs);
+  ApproxClause* ActOnApproxMemoClause(approx::ClauseKind Kind, approx::ApproxVarListLocTy &Locs);
+  ApproxClause* ActOnApproxDTClause(approx::ClauseKind Kind, approx::ApproxVarListLocTy &Locs);
+  ApproxClause* ActOnApproxNNClause(approx::ClauseKind Kind, approx::ApproxVarListLocTy &Locs);
+  ApproxClause* ActOnApproxUserClause(approx::ClauseKind Kind, approx::ApproxVarListLocTy &Locs);
+  ApproxClause* ActOnApproxIfClause(approx::ClauseKind Kind, approx::ApproxVarListLocTy &Locs);
+  ApproxClause* ActOnApproxVarList(approx::ClauseKind Kind, ArrayRef<Expr *> Vars, approx::ApproxVarListLocTy &Locs);
 
   /// Initialization of captured region for OpenMP region.
   void ActOnOpenMPRegionStart(OpenMPDirectiveKind DKind, Scope *CurScope);

@@ -9725,6 +9725,12 @@ def warn_mig_server_routine_does_not_return_kern_return_t : Warning<
   InGroup<IgnoredAttributes>;
 } // end of sema category
 
+let CategoryName = "Approx Issue" in {
+//Approx supoprt
+def err_approx_expected_sema : Error<
+  "Error In Sema Analysis">;
+} // end of approx category
+
 let CategoryName = "OpenMP Issue" in {
 // OpenMP support.
 def err_omp_expected_var_arg : Error<

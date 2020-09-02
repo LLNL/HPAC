@@ -1222,6 +1222,8 @@ def err_pragma_approx_expected_directive : Error<
   "unexpected end of pragma">;
 def err_pragma_approx_unrecognized_directive: Error<
   "unrecognized directive in approx pragma">;
+def err_pragma_approx_expected_punc : Error<
+  "expected ',' or ')'">;
 
 // OpenMP support.
 def warn_pragma_omp_ignored : Warning<

@@ -13,7 +13,9 @@
 #ifndef LLVM_CLANG_PARSE_PARSER_H
 #define LLVM_CLANG_PARSE_PARSER_H
 
+#include "clang/AST/ApproxClause.h"
 #include "clang/AST/Availability.h"
+#include "clang/Basic/Approx.h"
 #include "clang/Basic/BitmaskEnum.h"
 #include "clang/Basic/OpenMPKinds.h"
 #include "clang/Basic/OperatorPrecedence.h"
@@ -3202,6 +3204,25 @@ private:
   /// it processes entire pragma line at once
   // We will work on changing that.
   StmtResult ParseApproxDirective(ParsedStmtContext StmtCtx);
+
+  typedef ApproxClause* (ParseApproxClauseFn)(approx::ClauseKind CK);
+
+  /// Function Pointer to member function
+  typedef ApproxClause* (Parser::*ParseApproxClauseFnPtr)(approx::ClauseKind CK);
+
+  ParseApproxClauseFnPtr ParseApproxClause[approx::CK_END];
+
+  ParseApproxClauseFn ParseApproxPerfoClause;
+  ParseApproxClauseFn ParseApproxMemoClause;
+  ParseApproxClauseFn ParseApproxDTClause;
+  ParseApproxClauseFn ParseApproxNNClause;
+  ParseApproxClauseFn ParseApproxUserClause;
+  ParseApproxClauseFn ParseApproxIfClause;
+  ParseApproxClauseFn ParseApproxInClause;
+  ParseApproxClauseFn ParseApproxOutClause;
+  ParseApproxClauseFn ParseApproxInOutClause;
+
+  bool ParseApproxVarList(SmallVectorImpl<Expr*> &Vars, SourceLocation &ELoc);
 
 public:
   /// Parses simple expression in parens for single-expression clauses of OpenMP

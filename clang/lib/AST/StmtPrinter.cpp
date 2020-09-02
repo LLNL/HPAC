@@ -11,6 +11,7 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "clang/AST/ApproxClause.h"
 #include "clang/AST/ASTContext.h"
 #include "clang/AST/Attr.h"
 #include "clang/AST/Decl.h"
@@ -637,8 +638,15 @@ void StmtPrinter::VisitSEHLeaveStmt(SEHLeaveStmt *Node) {
 //  Approx directives printing methods
 //===----------------------------------------------------------------------===//
 void StmtPrinter::VisitApproxDirective(ApproxDirective *Node) {
-  Indent() << "#pragma approx";
-  // TODO: add clauses
+  OS << "#pragma approx ";
+  ApproxClausePrinter Printer(OS, Policy);
+  ArrayRef<ApproxClause*> Clauses = Node->clauses();
+  for ( auto *Clause : Clauses){
+    if ( Clause ){
+      Printer.Visit(Clause);
+    }
+  }
+  OS << NL;
 }
 
 //===----------------------------------------------------------------------===//

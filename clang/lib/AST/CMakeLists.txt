@@ -14,6 +14,7 @@ clang_tablegen(Opcodes.inc
   TARGET Opcodes)
 
 add_clang_library(clangAST
+  ApproxClause.cpp
   APValue.cpp
   ASTConcept.cpp
   ASTConsumer.cpp
