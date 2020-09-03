@@ -44,6 +44,7 @@ add_clang_library(clangAST
   CXXInheritance.cpp
   DataCollection.cpp
   Decl.cpp
+  DeclApprox.cpp
   DeclarationName.cpp
   DeclBase.cpp
   DeclCXX.cpp

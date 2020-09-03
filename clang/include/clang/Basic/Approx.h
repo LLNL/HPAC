@@ -35,6 +35,17 @@ enum ClauseKind : uint {
 const unsigned CK_START = CK_PERFO;
 const unsigned CK_END = CK_INOUT + 1;
 
+enum PerfoType : uint {
+  PT_SMALL = 0,
+  PT_LARGE,
+  PT_RAND,
+  PT_SINIT,
+  PT_SFINAL
+};
+
+const unsigned PT_START = PT_SMALL;
+const unsigned PT_END = PT_SFINAL +1;
+
 struct ApproxVarListLocTy {
   SourceLocation StartLoc;
   SourceLocation LParenLoc;

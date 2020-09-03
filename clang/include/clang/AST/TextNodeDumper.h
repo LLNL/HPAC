@@ -346,6 +346,7 @@ public:
   void VisitOMPDeclareReductionDecl(const OMPDeclareReductionDecl *D);
   void VisitOMPRequiresDecl(const OMPRequiresDecl *D);
   void VisitOMPCapturedExprDecl(const OMPCapturedExprDecl *D);
+  void VisitApproxCapturedExprDecl(const ApproxCapturedExprDecl *D);
   void VisitNamespaceDecl(const NamespaceDecl *D);
   void VisitUsingDirectiveDecl(const UsingDirectiveDecl *D);
   void VisitNamespaceAliasDecl(const NamespaceAliasDecl *D);

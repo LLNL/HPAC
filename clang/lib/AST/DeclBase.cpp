@@ -17,6 +17,7 @@
 #include "clang/AST/Attr.h"
 #include "clang/AST/AttrIterator.h"
 #include "clang/AST/Decl.h"
+#include "clang/AST/DeclApprox.h"
 #include "clang/AST/DeclCXX.h"
 #include "clang/AST/DeclContextInternals.h"
 #include "clang/AST/DeclFriend.h"
@@ -872,6 +873,7 @@ unsigned Decl::getIdentifierNamespaceForKind(Kind DeclKind) {
     case OMPAllocate:
     case OMPRequires:
     case OMPCapturedExpr:
+    case ApproxCapturedExpr:
     case Empty:
     case LifetimeExtendedTemporary:
     case RequiresExprBody:

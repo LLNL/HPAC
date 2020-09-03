@@ -1493,6 +1493,12 @@ enum DeclCode {
   /// An LifetimeExtendedTemporaryDecl record.
   DECL_LIFETIME_EXTENDED_TEMPORARY,
 
+  /// An ApproxDecl record.
+  DECL_APPROX_CAPTUREDEXPR,
+
+  /// An OMPCapturedExprDecl record.
+  DECL_OMP_CAPTUREDEXPR,
+
   /// A RequiresExprBodyDecl record.
   DECL_REQUIRES_EXPR_BODY,
 

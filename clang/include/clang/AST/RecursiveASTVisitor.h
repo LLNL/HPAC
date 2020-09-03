@@ -16,6 +16,8 @@
 #include "clang/AST/ASTConcept.h"
 #include "clang/AST/Attr.h"
 #include "clang/AST/Decl.h"
+#include "clang/AST/DeclApprox.h"
+#include "clang/AST/DeclarationName.h"
 #include "clang/AST/DeclBase.h"
 #include "clang/AST/DeclCXX.h"
 #include "clang/AST/DeclFriend.h"
@@ -1764,6 +1766,7 @@ DEF_TRAVERSE_DECL(OMPDeclareMapperDecl, {
 })
 
 DEF_TRAVERSE_DECL(OMPCapturedExprDecl, { TRY_TO(TraverseVarHelper(D)); })
+DEF_TRAVERSE_DECL(ApproxCapturedExprDecl, { TRY_TO(TraverseVarHelper(D)); })
 
 DEF_TRAVERSE_DECL(OMPAllocateDecl, {
   for (auto *I : D->varlists())

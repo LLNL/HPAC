@@ -107,6 +107,7 @@ namespace {
     void VisitOMPDeclareReductionDecl(OMPDeclareReductionDecl *D);
     void VisitOMPDeclareMapperDecl(OMPDeclareMapperDecl *D);
     void VisitOMPCapturedExprDecl(OMPCapturedExprDecl *D);
+    void VisitApproxCapturedExprDecl(ApproxCapturedExprDecl *D);
     void VisitTemplateTypeParmDecl(const TemplateTypeParmDecl *TTP);
     void VisitNonTypeTemplateParmDecl(const NonTypeTemplateParmDecl *NTTP);
     void VisitHLSLBufferDecl(HLSLBufferDecl *D);
@@ -1765,6 +1766,10 @@ void DeclPrinter::VisitOMPDeclareMapperDecl(OMPDeclareMapperDecl *D) {
 
 void DeclPrinter::VisitOMPCapturedExprDecl(OMPCapturedExprDecl *D) {
   D->getInit()->printPretty(Out, nullptr, Policy, Indentation, "\n", &Context);
+}
+
+void DeclPrinter::VisitApproxCapturedExprDecl(ApproxCapturedExprDecl *D) {
+  D->getInit()->printPretty(Out, nullptr, Policy, Indentation);
 }
 
 void DeclPrinter::VisitTemplateTypeParmDecl(const TemplateTypeParmDecl *TTP) {

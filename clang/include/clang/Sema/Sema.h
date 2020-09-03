@@ -11272,12 +11272,16 @@ public:
   /// Called after parsing the '\#pragma approx' directive.
   StmtResult ActOnApproxDirective(Stmt *AssociatedStmt, ArrayRef<ApproxClause *> Clauses, approx::ApproxVarListLocTy &Locs);
   //Called to process each approx clause respectively
-  ApproxClause* ActOnApproxPerfoClause(approx::ClauseKind Kind, approx::ApproxVarListLocTy &Locs);
+    ApproxClause* ActOnApproxPerfoClause(approx::ClauseKind Kind,
+                                       approx::PerfoType PType,
+                                       approx::ApproxVarListLocTy &Locs,
+                                       Expr *Step);
+
   ApproxClause* ActOnApproxMemoClause(approx::ClauseKind Kind, approx::ApproxVarListLocTy &Locs);
   ApproxClause* ActOnApproxDTClause(approx::ClauseKind Kind, approx::ApproxVarListLocTy &Locs);
   ApproxClause* ActOnApproxNNClause(approx::ClauseKind Kind, approx::ApproxVarListLocTy &Locs);
   ApproxClause* ActOnApproxUserClause(approx::ClauseKind Kind, approx::ApproxVarListLocTy &Locs);
-  ApproxClause* ActOnApproxIfClause(approx::ClauseKind Kind, approx::ApproxVarListLocTy &Locs);
+  ApproxClause* ActOnApproxIfClause(approx::ClauseKind Kind, approx::ApproxVarListLocTy &Locs, Expr *Cond);
   ApproxClause* ActOnApproxVarList(approx::ClauseKind Kind, ArrayRef<Expr *> Vars, approx::ApproxVarListLocTy &Locs);
 
   /// Initialization of captured region for OpenMP region.

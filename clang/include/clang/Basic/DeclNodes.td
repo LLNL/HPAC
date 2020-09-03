@@ -60,6 +60,7 @@ def Named : DeclNode<Decl, "named declarations", 1>;
             : DeclNode<VarTemplateSpecialization>;
         def ImplicitParam : DeclNode<Var>;
         def ParmVar : DeclNode<Var, "parameters">;
+        def ApproxCapturedExpr : DeclNode<Var>;
         def Decomposition : DeclNode<Var>;
         def OMPCapturedExpr : DeclNode<Var>;
       def NonTypeTemplateParm : DeclNode<Declarator>;

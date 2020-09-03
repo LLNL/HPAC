@@ -23,6 +23,16 @@ using namespace clang;
 using namespace llvm;
 using namespace approx;
 
+static bool isPerfoType(Token &Tok, PerfoType &Kind) {
+  for (unsigned i = PT_START; i < PT_END; i++) {
+    enum PerfoType PT = (enum PerfoType)i;
+    if (Tok.getIdentifierInfo()->getName().equals(ApproxPerfoClause::PerfoName[PT])) {
+      Kind = PT;
+      return true;
+    }
+  }
+  return false;
+}
 
 bool Parser::ParseApproxVarList(SmallVectorImpl<Expr *> &Vars,
                                 SourceLocation &ELoc) {
@@ -59,9 +69,33 @@ bool Parser::ParseApproxVarList(SmallVectorImpl<Expr *> &Vars,
 
 ApproxClause *Parser::ParseApproxPerfoClause(ClauseKind CK) {
   SourceLocation Loc = Tok.getLocation();
-  SourceLocation ELoc = ConsumeAnyToken();
-  ApproxVarListLocTy Locs(Loc, SourceLocation(), ELoc);
-  return Actions.ActOnApproxPerfoClause(CK, Locs);
+  SourceLocation LParenLoc = ConsumeAnyToken();
+  BalancedDelimiterTracker T(*this, tok::l_paren, tok::annot_pragma_approx_end);
+  if (T.expectAndConsume(diag::err_expected_lparen_after, ApproxPerfoClause::PerfoName[CK].c_str()))
+    return nullptr;
+
+  PerfoType PT;
+  if (!isPerfoType(Tok, PT)){
+    return nullptr;
+  }
+  /// Consume Perf Type
+  ConsumeAnyToken();
+
+  ///Parse ':'
+  if (Tok.isNot(tok::colon)){
+    return nullptr;
+  }
+  /// Consuming ':'
+  ConsumeAnyToken();
+  SourceLocation ExprLoc = Tok.getLocation();
+  ExprResult Val(ParseExpression());
+  Val = Actions.ActOnFinishFullExpr(Val.get(), ExprLoc, false);
+  SourceLocation ELoc = Tok.getLocation();
+  if (!T.consumeClose())
+    ELoc = T.getCloseLocation();
+  ApproxVarListLocTy Locs(Loc, LParenLoc, ELoc);
+
+  return Actions.ActOnApproxPerfoClause(CK, PT, Locs, Val.get());
 }
 
 ApproxClause *Parser::ParseApproxMemoClause(ClauseKind CK) {
@@ -93,10 +127,27 @@ ApproxClause *Parser::ParseApproxUserClause(ClauseKind CK) {
 }
 
 ApproxClause *Parser::ParseApproxIfClause(ClauseKind CK) {
+  //Start Location
   SourceLocation Loc = Tok.getLocation();
-  SourceLocation ELoc = ConsumeAnyToken();
-  ApproxVarListLocTy Locs(Loc, SourceLocation(), ELoc);
-  return Actions.ActOnApproxIfClause(CK, Locs);
+  SourceLocation LParenLoc = ConsumeAnyToken();
+  BalancedDelimiterTracker T(*this, tok::l_paren, tok::annot_pragma_approx_end);
+  if (T.expectAndConsume(diag::err_expected_lparen_after, ApproxClause::Name[CK].c_str()))
+    return nullptr;
+
+  SourceLocation ExprLoc = Tok.getLocation();
+  ExprResult LHS(ParseCastExpression(AnyCastExpr, false, NotTypeCast));
+  ExprResult Val = ParseRHSOfBinaryExpression(LHS, prec::Conditional);
+  Val = Actions.ActOnFinishFullExpr(Val.get(), ExprLoc, false );
+
+  SourceLocation ELoc = Tok.getLocation();
+  if (!T.consumeClose())
+    ELoc = T.getCloseLocation();
+
+  if ( Val.isInvalid() )
+    return nullptr;
+
+  ApproxVarListLocTy Locs(Loc, LParenLoc, ELoc);
+  return Actions.ActOnApproxIfClause(CK, Locs, Val.get());
 }
 
 ApproxClause *Parser::ParseApproxInClause(ClauseKind CK) {
@@ -172,7 +223,7 @@ StmtResult Parser::ParseApproxDirective(ParsedStmtContext StmtCtx) {
 
   ClauseKind CK;
   while (Tok.isNot(tok::annot_pragma_approx_end)) {
-    if (Tok.is(tok::identifier) && isApproxClause(Tok, CK)) {
+    if (isApproxClause(Tok, CK)) {
       ApproxClause *Clause = PARSER_CALL(ParseApproxClause[CK])(CK);
       if (!Clause) {
         SkipUntil(tok::annot_pragma_approx_end);
