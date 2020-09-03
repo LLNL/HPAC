@@ -14,6 +14,7 @@
 #define LLVM_CLANG_AST_DECLVISITOR_H
 
 #include "clang/AST/Decl.h"
+#include "clang/AST/DeclApprox.h"
 #include "clang/AST/DeclBase.h"
 #include "clang/AST/DeclCXX.h"
 #include "clang/AST/DeclFriend.h"

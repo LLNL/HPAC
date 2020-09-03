@@ -1471,6 +1471,9 @@ public:
       /// An ObjCTypeParamDecl record.
       DECL_OBJC_TYPE_PARAM,
 
+      /// An ApproxDecl record.
+      DECL_APPROX_CAPTUREDEXPR,
+
       /// An OMPCapturedExprDecl record.
       DECL_OMP_CAPTUREDEXPR,
 

@@ -13,6 +13,7 @@
 #ifndef LLVM_CLANG_LIB_CODEGEN_CODEGENMODULE_H
 #define LLVM_CLANG_LIB_CODEGEN_CODEGENMODULE_H
 
+#include "CGApproxRuntime.h"
 #include "CGVTables.h"
 #include "CodeGenTypeCache.h"
 #include "CodeGenTypes.h"
@@ -321,6 +322,7 @@ private:
   /// Holds information about C++ vtables.
   CodeGenVTables VTables;
 
+  std::unique_ptr<CGApproxRuntime> ApproxRuntime;
   std::unique_ptr<CGObjCRuntime> ObjCRuntime;
   std::unique_ptr<CGOpenCLRuntime> OpenCLRuntime;
   std::unique_ptr<CGOpenMPRuntime> OpenMPRuntime;
@@ -501,6 +503,7 @@ private:
 
   /// @}
 
+  void createApproxRuntime();
   /// Lazily create the Objective-C runtime
   void createObjCRuntime();
 
@@ -595,6 +598,12 @@ public:
   CGOpenMPRuntime &getOpenMPRuntime() {
     assert(OpenMPRuntime != nullptr);
     return *OpenMPRuntime;
+  }
+
+  /// Return a reference to the configured Approx runtime.
+  CGApproxRuntime &getApproxRuntime() {
+    assert(ApproxRuntime!= nullptr);
+    return *ApproxRuntime;
   }
 
   /// Return a pointer to the configured OpenMPIRBuilder, if any.

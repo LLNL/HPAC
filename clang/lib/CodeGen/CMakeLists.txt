@@ -41,6 +41,7 @@ endif()
 
 add_clang_library(clangCodeGen
   BackendUtil.cpp
+  CGApproxRuntime.cpp
   CGAtomic.cpp
   CGBlocks.cpp
   CGBuiltin.cpp

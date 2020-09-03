@@ -16,6 +16,8 @@
 #define LLVM_CLANG_AST_APPROXCLAUSE_H
 
 #include "clang/AST/ASTContext.h"
+#include "clang/AST/Expr.h"
+#include "clang/AST/Stmt.h"
 #include "clang/AST/StmtIterator.h"
 #include "clang/Basic/Approx.h"
 #include "clang/Basic/SourceLocation.h"
@@ -28,8 +30,6 @@
 
 namespace clang {
 
-class Expr;
-class Stmt;
 /// This is a basic class for representing a
 /// single Approx Clause.
 class ApproxClause {
@@ -87,11 +87,23 @@ public:
 };
 
 class ApproxPerfoClause final : public ApproxClause {
+  approx::PerfoType Type;
+  SourceLocation LParenLoc;
+  Stmt *Step = nullptr;
+  Stmt *PreInit = nullptr;
+
+  void setStep(Expr *S) { Step = S; }
+  void setPreInit(Expr *Init) { PreInit = Init; }
+
+
 public:
+  static const std::string PerfoName[approx::PT_END];
   /// \param StartLoc Starting location of the clause.
   /// \param EndLoc Ending location of the clause.
-  ApproxPerfoClause(SourceLocation StartLoc, SourceLocation EndLoc)
-      : ApproxClause(approx::CK_PERFO, StartLoc, EndLoc) {}
+  ApproxPerfoClause(approx::PerfoType PT, SourceLocation StartLoc,
+                    SourceLocation EndLoc, SourceLocation LParenLoc, Stmt *PreInit, Expr *Step)
+      : ApproxClause(approx::CK_PERFO, StartLoc, EndLoc), Type(PT),
+        LParenLoc(LParenLoc), Step(Step), PreInit(PreInit) {}
 
   /// Build an empty clause.
   ApproxPerfoClause()
@@ -115,6 +127,13 @@ public:
   static bool classof(const ApproxClause *T) {
     return T->getClauseKind() == approx::CK_PERFO;
   }
+
+  std::string getPerfoTypeAsString() const { return PerfoName[Type]; }
+  approx::PerfoType getPerfoType() const { return Type; }
+  SourceLocation getLParenLoc() const { return LParenLoc; }
+  Expr *getStep() const { return cast_or_null<Expr>(Step); }
+  const Stmt *getPreInit() const { return PreInit; }
+  Stmt *getPreInit() { return PreInit; }
 };
 
 class ApproxMemoClause final : public ApproxClause {
@@ -240,11 +259,26 @@ public:
 };
 
 class ApproxIfClause final : public ApproxClause {
+
+  ///Location of '('.
+  SourceLocation LParenLoc;
+  /// Stmt That contains declaration of variables
+  Stmt *PreInit = nullptr;
+
+  /// Condition of if Stmt
+  Stmt *Condition = nullptr;
+
+  void setCondition(Expr *Cond) { Condition = Cond; }
+  void setPreInit(Expr *Init) { PreInit = Init; }
+
+
 public:
   /// \param StartLoc Starting location of the clause.
   /// \param EndLoc Ending location of the clause.
-  ApproxIfClause(SourceLocation StartLoc, SourceLocation EndLoc)
-      : ApproxClause(approx::CK_IF, StartLoc, EndLoc) {}
+  ApproxIfClause(SourceLocation StartLoc, SourceLocation EndLoc,
+                 SourceLocation LParenLoc, Stmt *PreInit, Expr *Cond)
+      : ApproxClause(approx::CK_IF, StartLoc, EndLoc), LParenLoc(LParenLoc),
+        PreInit(PreInit), Condition(Cond) {}
 
   /// Build an empty clause.
   ApproxIfClause() : ApproxClause(approx::CK_IF, SourceLocation(), SourceLocation()) {}
@@ -267,6 +301,15 @@ public:
   static bool classof(const ApproxClause *T) {
     return T->getClauseKind() == approx::CK_IF;
   }
+
+  SourceLocation getLParenLoc() const { return LParenLoc; }
+
+  Expr *getCondition() const { return cast_or_null<Expr>(Condition); }
+
+  const Stmt *getPreInit() const { return PreInit; }
+
+  Stmt *getPreInit() { return PreInit; }
+
 };
 
 template <class T> class ApproxVarListClause : public ApproxClause {
