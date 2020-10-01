@@ -159,24 +159,30 @@ static void getVarInfoType(ASTContext &C, QualType &VarInfoTy) {
 }
 
 CGApproxRuntime::CGApproxRuntime(CodeGenModule &CGM)
-    : CGM(CGM), approxRegions(0), StartLoc(SourceLocation()),
-      EndLoc(SourceLocation()) {
+    : CGM(CGM), CallbackFnTy(nullptr), RTFnTy(nullptr), approxRegions(0),
+      StartLoc(SourceLocation()), EndLoc(SourceLocation()) {
   ASTContext &C = CGM.getContext();
-  for (unsigned i = ARG_START; i < ARG_END; i++) {
-    approxRTParams.push_back(nullptr);
-    approxRTTypes.push_back(nullptr);
-  }
   getPerfoInfoType(C, PerfoInfoTy);
   getVarInfoType(C, VarInfoTy);
+
+  CallbackFnTy = llvm::FunctionType::get(CGM.VoidTy, {CGM.VoidPtrTy}, false);
+
+  // This is the runtime call function type information, which mirrors the
+  // types provided in the argument parameters.
+  RTFnTy = llvm::FunctionType::get(
+      CGM.VoidTy,
+      {llvm::PointerType::getUnqual(CallbackFnTy),
+       llvm::PointerType::getUnqual(CallbackFnTy), CGM.VoidPtrTy,
+       llvm::Type::getInt1Ty(CGM.getLLVMContext()), CGM.VoidPtrTy,
+       CGM.VoidPtrTy, CGM.Int32Ty, CGM.Int32Ty},
+      false);
 }
 
 void CGApproxRuntime::CGApproxRuntimeEnterRegion(CodeGenFunction &CGF,
                                                  CapturedStmt &CS) {
   /// Reset All info of the Runtime "state machine"
-  for (unsigned i = ARG_START; i < ARG_END; i++) {
+  for (unsigned i = ARG_START; i < ARG_END; i++)
     approxRTParams[i] = nullptr;
-    approxRTTypes[i] = nullptr;
-  }
 
   Address CapStructAddr = CGF.GenerateCapturedStmtArgument(CS);
   CodeGenFunction::CGCapturedStmtInfo CGSI(CS);
@@ -184,25 +190,15 @@ void CGApproxRuntime::CGApproxRuntimeEnterRegion(CodeGenFunction &CGF,
   CodeGenFunction::CGCapturedStmtRAII CapInfoRAII(localCGF, &CGSI);
   llvm::Function *Fn = localCGF.GenerateCapturedStmtFunction(CS);
 
-  /// Set Types of the function call
-  approxRTTypes[AccurateFn] =
-      llvm::PointerType::getUnqual(Fn->getFunctionType());
-  /// The type of the perforated function is the same with the accurate one
-  approxRTTypes[PerfoFn] = approxRTTypes[AccurateFn];
-  approxRTTypes[CapDataPtr] = CapStructAddr.getType();
-  approxRTTypes[Cond] = CGF.Builder.getInt1Ty();
-  approxRTTypes[PerfoDesc] = CGM.VoidPtrTy;
-  approxRTTypes[DataDesc] = CGM.VoidPtrTy;
-  approxRTTypes[DataSize] = CGM.Int32Ty;
-  approxRTTypes[MemoDescr] = CGM.Int32Ty;
-
   /// Fill in parameters of runtime function call
   /// Put default values on everything.
   /// EmitClause* Will replace as necessary
-  approxRTParams[AccurateFn] = Fn;
+  approxRTParams[AccurateFn] =
+      CGF.Builder.CreatePointerCast(Fn, CallbackFnTy->getPointerTo());
   approxRTParams[PerfoFn] = llvm::ConstantPointerNull::get(
-      llvm::PointerType::getUnqual(Fn->getFunctionType()));
-  approxRTParams[CapDataPtr] = CapStructAddr.getPointer();
+      llvm::PointerType::getUnqual(CallbackFnTy));
+  approxRTParams[CapDataPtr] =
+      CGF.Builder.CreatePointerCast(CapStructAddr.getPointer(), CGM.VoidPtrTy);
   approxRTParams[Cond] = llvm::ConstantInt::get(CGF.Builder.getInt1Ty(), true);
   approxRTParams[PerfoDesc] = llvm::ConstantPointerNull::get(CGM.VoidPtrTy);
   approxRTParams[DataDesc] = llvm::ConstantPointerNull::get(CGM.VoidPtrTy);
@@ -293,19 +289,23 @@ void CGApproxRuntime::CGApproxRuntimeEmitPerfoFn(CapturedStmt &CS) {
   /// When we decide how the Interaction of the Attributes will work with LLVM
   /// we will add extra information here.
   Fn->addFnAttr("Perforate");
-  approxRTParams[PerfoFn] = Fn;
+  approxRTParams[AccurateFn] =
+      CGF.Builder.CreatePointerCast(Fn, CallbackFnTy->getPointerTo());
   return;
 }
 
 void CGApproxRuntime::CGApproxRuntimeExitRegion(CodeGenFunction &CGF) {
-  /// Create Runtime function type
-  llvm::FunctionType *RTFnTy =
-      llvm::FunctionType::get(llvm::Type::getVoidTy(CGF.getLLVMContext()),
-                              ArrayRef<llvm::Type *>(approxRTTypes), false);
-  llvm::Function *RTFn =
-      Function::Create(RTFnTy, GlobalValue::ExternalLinkage,
-                       "__approx_exec_call", CGM.getModule());
-  CGF.EmitCallOrInvoke(RTFn, ArrayRef<llvm::Value *>(approxRTParams));
+  Function *RTFn = nullptr;
+  StringRef RTFnName("__approx_exec_call");
+  RTFn = CGM.getModule().getFunction(RTFnName);
+
+  assert(RTFnTy != nullptr);
+  if (!RTFn)
+    RTFn = Function::Create(RTFnTy, GlobalValue::ExternalLinkage, RTFnName,
+                            CGM.getModule());
+
+  llvm::FunctionCallee RTFnCallee({RTFnTy, RTFn});
+  CGF.EmitRuntimeCall(RTFnCallee, ArrayRef<llvm::Value *>(approxRTParams));
 }
 
 void CGApproxRuntime::CGApproxRuntimeRegisterInputs(ApproxInClause &InClause) {
