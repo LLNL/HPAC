@@ -64,9 +64,12 @@ private:
   ///        uint8_t dir;       // Direction of data: in/out/inout
   ///    } approx_var_info_t;
   QualType VarInfoTy;
-  llvm::SmallVector<llvm::Value *, ARG_END> approxRTParams;
-  llvm::SmallVector<llvm::Type *, ARG_END> approxRTTypes;
+  llvm::Value *approxRTParams[ARG_END];
   llvm::SmallVector<std::pair<Expr *, Directionality>, 16> Data;
+  // Function type of callback functions.
+  llvm::FunctionType *CallbackFnTy;
+  // Function type of the runtime interface call.
+  llvm::FunctionType *RTFnTy;
   int approxRegions;
   SourceLocation StartLoc;
   SourceLocation EndLoc;
