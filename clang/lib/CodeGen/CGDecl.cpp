@@ -100,6 +100,7 @@ void CodeGenFunction::EmitDecl(const Decl &D) {
   case Decl::ObjCTypeParam:
   case Decl::Binding:
     llvm_unreachable("Declaration should not be in declstmts!");
+  case Decl::ApproxCapturedExpr:
   case Decl::Function:  // void X();
   case Decl::Record:    // struct/union/class X;
   case Decl::Enum:      // enum X;

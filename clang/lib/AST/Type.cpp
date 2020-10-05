@@ -3022,6 +3022,8 @@ StringRef BuiltinType::getName(const PrintingPolicy &Policy) const {
     return "reserve_id_t";
   case IncompleteMatrixIdx:
     return "<incomplete matrix index type>";
+  case ApproxArraySection:
+    return "<Approx array section type>";
   case OMPArraySection:
     return "<OpenMP array section type>";
   case OMPArrayShaping:
@@ -4050,6 +4052,7 @@ bool Type::canHaveNullability(bool ResultIfUnknown) const {
     case BuiltinType::BuiltinFn:
     case BuiltinType::NullPtr:
     case BuiltinType::IncompleteMatrixIdx:
+    case BuiltinType::ApproxArraySection:
     case BuiltinType::OMPArraySection:
     case BuiltinType::OMPArrayShaping:
     case BuiltinType::OMPIterator:

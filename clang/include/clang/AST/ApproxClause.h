@@ -137,11 +137,15 @@ public:
 };
 
 class ApproxMemoClause final : public ApproxClause {
+  approx::MemoType Type;
+  SourceLocation LParenLoc;
 public:
+  static const std::string MemoName[approx::MT_END];
   /// \param StartLoc Starting location of the clause.
   /// \param EndLoc Ending location of the clause.
-  ApproxMemoClause(SourceLocation StartLoc, SourceLocation EndLoc)
-      : ApproxClause(approx::CK_MEMO, StartLoc, EndLoc) {}
+  ApproxMemoClause(approx::MemoType MT, SourceLocation StartLoc,
+                    SourceLocation EndLoc, SourceLocation LParenLoc)
+      :ApproxClause(approx::CK_MEMO, StartLoc, EndLoc), Type(MT), LParenLoc(LParenLoc){}
 
   /// Build an empty clause.
   ApproxMemoClause()
@@ -165,6 +169,9 @@ public:
   static bool classof(const ApproxClause *T) {
     return T->getClauseKind() == approx::CK_MEMO;
   }
+
+  std::string getMemoTypeAsString() const {return MemoName[Type];}
+  approx::MemoType getMemoType() const {return Type;}
 };
 
 class ApproxDTClause final : public ApproxClause {

@@ -29,22 +29,30 @@ enum ClauseKind : uint {
   CK_IF,
   CK_IN,
   CK_OUT,
-  CK_INOUT
+  CK_INOUT,
+  CK_END
 };
 
 const unsigned CK_START = CK_PERFO;
-const unsigned CK_END = CK_INOUT + 1;
 
 enum PerfoType : uint {
   PT_SMALL = 0,
   PT_LARGE,
   PT_RAND,
   PT_SINIT,
-  PT_SFINAL
+  PT_SFINAL,
+  PT_END
 };
 
 const unsigned PT_START = PT_SMALL;
-const unsigned PT_END = PT_SFINAL +1;
+
+enum MemoType : uint {
+  MT_IN = 0,
+  MT_OUT,
+  MT_END
+};
+
+const unsigned MT_START = MT_IN;
 
 struct ApproxVarListLocTy {
   SourceLocation StartLoc;

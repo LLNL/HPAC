@@ -15,6 +15,7 @@
 #include "clang/AST/DeclObjC.h"
 #include "clang/AST/DeclTemplate.h"
 #include "clang/AST/Expr.h"
+#include "clang/AST/ExprApprox.h"
 #include "clang/AST/ExprCXX.h"
 #include "clang/AST/ExprObjC.h"
 #include "clang/AST/ExprOpenMP.h"
@@ -1228,6 +1229,10 @@ void StmtProfiler::VisitArraySubscriptExpr(const ArraySubscriptExpr *S) {
 }
 
 void StmtProfiler::VisitMatrixSubscriptExpr(const MatrixSubscriptExpr *S) {
+  VisitExpr(S);
+}
+
+void StmtProfiler::VisitApproxArraySectionExpr(const ApproxArraySectionExpr *S) {
   VisitExpr(S);
 }
 

@@ -27,6 +27,10 @@ const std::string ApproxClause::Name[approx::CK_END] = {
 const std::string ApproxPerfoClause::PerfoName[approx::PT_END] = {
     "small", "large", "rand", "init", "final"};
 
+const std::string ApproxMemoClause::MemoName[approx::MT_END] = {
+    "in", "out"};
+
+
 ApproxInClause *ApproxInClause::Create(const ASTContext &C,
                                        SourceLocation StartLoc,
                                        SourceLocation LParenLoc,
@@ -84,7 +88,7 @@ void ApproxClausePrinter::VisitApproxPerfoClause(ApproxPerfoClause *Node) {
 }
 
 void ApproxClausePrinter::VisitApproxMemoClause(ApproxMemoClause *Node) {
-  OS << Node->getAsString() << " ";
+  OS << Node->getAsString() << "(" << Node->getMemoTypeAsString() << ") ";
 }
 
 void ApproxClausePrinter::VisitApproxDTClause(ApproxDTClause *Node) {
@@ -100,7 +104,9 @@ void ApproxClausePrinter::VisitApproxUserClause(ApproxUserClause *Node) {
 }
 
 void ApproxClausePrinter::VisitApproxIfClause(ApproxIfClause *Node) {
-  OS << Node->getAsString() << " ";
+  OS << Node->getAsString() << "(";
+  Node->getCondition()->printPretty(OS,nullptr, Policy, 0);
+  OS << ")";
 }
 
 template<typename T>

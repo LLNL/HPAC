@@ -19,11 +19,58 @@
 #include "clang/Basic/IdentifierTable.h"
 #include "clang/Parse/ParseDiagnostic.h"
 #include "clang/Sema/Sema.h"
+#include "llvm/ADT/IndexedMap.h"
+#include "llvm/ADT/PointerEmbeddedInt.h"
+#include "llvm/ADT/STLExtras.h"
 #include "llvm/Support/Debug.h"
 
 using namespace clang;
 using namespace llvm;
 using namespace approx;
+
+ExprResult Sema::PerformApproxImplicitIntegerConversion(SourceLocation Loc,
+                                                        Expr *Op) {
+  if (!Op)
+    return ExprError();
+
+  class IntConvertDiagnoser : public ICEConvertDiagnoser {
+  public:
+    IntConvertDiagnoser()
+        : ICEConvertDiagnoser(/*AllowScopedEnumerations*/ false, false, true) {}
+    SemaDiagnosticBuilder diagnoseNotInt(Sema &S, SourceLocation Loc,
+                                         QualType T) override {
+      return S.Diag(Loc, diag::err_approx_not_integral) << T;
+    }
+    SemaDiagnosticBuilder diagnoseIncomplete(Sema &S, SourceLocation Loc,
+                                             QualType T) override {
+      return S.Diag(Loc, diag::err_approx_incomplete_type) << T;
+    }
+    SemaDiagnosticBuilder diagnoseExplicitConv(Sema &S, SourceLocation Loc,
+                                               QualType T,
+                                               QualType ConvTy) override {
+      return S.Diag(Loc, diag::err_approx_explicit_conversion) << T << ConvTy;
+    }
+    SemaDiagnosticBuilder noteExplicitConv(Sema &S, CXXConversionDecl *Conv,
+                                           QualType ConvTy) override {
+      return S.Diag(Conv->getLocation(), diag::note_approx_conversion_here)
+             << ConvTy->isEnumeralType() << ConvTy;
+    }
+    SemaDiagnosticBuilder diagnoseAmbiguous(Sema &S, SourceLocation Loc,
+                                            QualType T) override {
+      return S.Diag(Loc, diag::err_approx_ambiguous_conversion) << T;
+    }
+    SemaDiagnosticBuilder noteAmbiguous(Sema &S, CXXConversionDecl *Conv,
+                                        QualType ConvTy) override {
+      return S.Diag(Conv->getLocation(), diag::note_approx_conversion_here)
+             << ConvTy->isEnumeralType() << ConvTy;
+    }
+    SemaDiagnosticBuilder diagnoseConversion(Sema &, SourceLocation, QualType,
+                                             QualType) override {
+      llvm_unreachable("conversion functions are permitted");
+    }
+  } ConvertDiagnoser;
+  return PerformContextualImplicitConversion(Loc, Op, ConvertDiagnoser);
+}
 
 static Stmt *buildApproxPreInits(ASTContext &Context,
                                  MutableArrayRef<Decl *> PreInits) {
@@ -136,39 +183,6 @@ StmtResult Sema::ActOnApproxDirective(Stmt *AssociatedStmt,
   return Stmt;
 }
 
-static const ValueDecl *getCanonicalDecl(const ValueDecl *D) {
-  const auto *VD = dyn_cast<VarDecl>(D);
-  const auto *FD = dyn_cast<FieldDecl>(D);
-  if (VD != nullptr) {
-    VD = VD->getCanonicalDecl();
-    D = FD;
-  } else {
-    assert(FD);
-    D = FD;
-  }
-  return D;
-}
-
-static ValueDecl *getCanonicalDecl(ValueDecl *D) {
-  return const_cast<ValueDecl *>(
-      getCanonicalDecl(const_cast<const ValueDecl *>(D)));
-}
-
-static ValueDecl *getNextVariable(Sema &S, Expr *&RefExpr, SourceLocation &ELoc,
-                                  SourceRange &ERange) {
-  /// TODO: This function needs to be extended to handle
-  /// more complicated cases such as subarrays and
-  /// range of arrays
-  RefExpr = RefExpr->IgnoreParens();
-  ELoc = RefExpr->getExprLoc();
-  ERange = RefExpr->getSourceRange();
-  RefExpr = RefExpr->IgnoreParenImpCasts();
-  auto *DE = dyn_cast_or_null<DeclRefExpr>(RefExpr);
-  if (!DE)
-    return nullptr;
-  return getCanonicalDecl(DE->getDecl());
-}
-
 ApproxClause *Sema::ActOnApproxPerfoClause(ClauseKind Kind, PerfoType PType,
                                            ApproxVarListLocTy &Locs, Expr *Step) {
   SourceLocation StartLoc = Locs.StartLoc;
@@ -184,10 +198,12 @@ ApproxClause *Sema::ActOnApproxPerfoClause(ClauseKind Kind, PerfoType PType,
 }
 
 ApproxClause *Sema::ActOnApproxMemoClause(ClauseKind Kind,
+                                          MemoType MType,
                                           ApproxVarListLocTy &Locs) {
   SourceLocation StartLoc = Locs.StartLoc;
+  SourceLocation LParenLoc = Locs.LParenLoc;
   SourceLocation EndLoc = Locs.EndLoc;
-  return new (Context) ApproxMemoClause(StartLoc, EndLoc);
+  return new (Context) ApproxMemoClause(MType, StartLoc, EndLoc, LParenLoc);
 }
 
 ApproxClause *Sema::ActOnApproxDTClause(ClauseKind Kind,
@@ -241,22 +257,69 @@ ApproxClause *Sema::ActOnApproxVarList(ClauseKind Kind,
   SourceLocation LParenLoc = Locs.LParenLoc;
   SourceLocation EndLoc = Locs.EndLoc;
   SmallVector<Expr *, 8> Vars;
-
   for (Expr *RefExpr : VarList) {
     assert(RefExpr && "Null Expr in Approx in/out/inout clause.");
-    SourceLocation ELoc;
-    SourceRange ERange;
-    Expr *SimpleRefExpr = RefExpr;
-    auto Res = getNextVariable(*this, SimpleRefExpr, ELoc, ERange);
-    if (!Res) {
+    SourceLocation ELoc = RefExpr->getExprLoc();
+    /// For template types
+    if (isa<DependentScopeDeclRefExpr>(RefExpr)) {
+      // It will be analyzed later.
       Vars.push_back(RefExpr);
-    } else {
-      ValueDecl *D = Res;
-      if (!D)
-        continue;
-      Vars.push_back(RefExpr->IgnoreParens());
+      continue;
     }
+    Expr *SimpleExpr = RefExpr->IgnoreParenCasts();
+    QualType ExprTy = RefExpr->getType().getNonReferenceType();
+    if (const auto *AASE = dyn_cast<ApproxArraySectionExpr>(SimpleExpr)) {
+      QualType BaseType = ApproxArraySectionExpr::getBaseOriginalType(AASE->getBase());
+      if (const auto *ATy = BaseType->getAsArrayTypeUnsafe())
+        ExprTy = ATy->getElementType();
+      else
+        ExprTy = BaseType->getPointeeType();
+
+      if(ExprTy->isPointerType()){
+        Diag(ELoc, diag::err_approx_expected_scalar_var_item);
+      }
+      const Expr *Length = AASE->getLength();
+      Expr::EvalResult Result;
+      if (Length && !Length->isValueDependent() &&
+          Length->EvaluateAsInt(Result, Context) &&
+          Result.Val.getInt().isNullValue()) {
+        Diag(ELoc,
+              diag::err_approx_depend_zero_length_array_section_not_allowed)
+            << SimpleExpr->getSourceRange();
+        continue;
+      }
+    }
+    else if ( auto *ASE = dyn_cast<ArraySubscriptExpr>(SimpleExpr) ){
+      if (!RefExpr->IgnoreParenImpCasts()->isLValue() ||
+        (ASE && !ASE->getBase()->isTypeDependent() &&
+          !ASE->getBase()
+              ->getType()
+              .getNonReferenceType()
+              ->isPointerType() &&
+          !ASE->getBase()->getType().getNonReferenceType()->isArrayType())) {
+            Diag(ELoc, diag::err_approx_expected_addressable_lvalue_or_array_item);
+            continue;
+      }
+    }
+    else{
+      if(SimpleExpr->getType()->isPointerType()){
+        Diag(ELoc, diag::err_approx_expected_scalar_var_item);
+      }
+    }
+
+    ExprResult Res;
+    {
+      Sema::TentativeAnalysisScope Trap(*this);
+      Res = CreateBuiltinUnaryOp(ELoc, UO_AddrOf,
+                                  RefExpr->IgnoreParenImpCasts());
+    }
+    if (!Res.isUsable() && !isa<ApproxArraySectionExpr>(SimpleExpr)) {
+      Diag(ELoc, diag::err_approx_expected_addressable_lvalue_or_array_item);
+      continue;
+    }
+    Vars.push_back(RefExpr->IgnoreParenImpCasts());
   }
+
   if (Vars.empty()) {
     return nullptr;
   } else if (Kind == CK_IN) {

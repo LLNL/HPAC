@@ -30,11 +30,16 @@ enum ApproxRTArgsIndex : uint {
   PerfoFn,
   CapDataPtr,
   Cond,
-  PerfoDesc
+  PerfoDesc,
+  DataDesc,
+  DataSize,
+  MemoDescr,
+  ARG_END
 };
 
+enum Directionality : int { Input = 1, Output = 2, InputOuput = 4 };
+
 const unsigned ARG_START = AccurateFn;
-const unsigned ARG_END = PerfoDesc + 1;
 
 class CGApproxRuntime {
 private:
@@ -47,9 +52,24 @@ private:
   ///    float rate;
   /// } approx_perfo_info_t;
   QualType PerfoInfoTy;
+
+  /// VarInfoTy is a struct containing info about the in/out/inout variables
+  /// of this region.
+  ///    typedef struct approx_var_info_t{
+  ///        void* ptr;         // Ptr to data
+  ///        size_t sz_bytes;   // size of data in bytes
+  ///        size_t num_elem;   // Number of elements
+  ///        size_t sz_elem;    // Size of elements in bytes
+  ///        int16_t data_type; // Type of data float/double/int etc.
+  ///        uint8_t dir;       // Direction of data: in/out/inout
+  ///    } approx_var_info_t;
+  QualType VarInfoTy;
   llvm::SmallVector<llvm::Value *, ARG_END> approxRTParams;
   llvm::SmallVector<llvm::Type *, ARG_END> approxRTTypes;
+  llvm::SmallVector<std::pair<Expr *, Directionality>, 16> Data;
   int approxRegions;
+  SourceLocation StartLoc;
+  SourceLocation EndLoc;
 
 private:
   void CGApproxRuntimeEmitPerfoFn(CapturedStmt &CS);
@@ -59,9 +79,15 @@ public:
   void CGApproxRuntimeEnterRegion(CodeGenFunction &CGF, CapturedStmt &CS);
   void CGApproxRuntimeEmitPerfoInit(CodeGenFunction &CGF, CapturedStmt &CS,
                                     ApproxPerfoClause &PerfoClause);
+  void CGApproxRuntimeEmitMemoInit(CodeGenFunction &CGF,
+                                   ApproxMemoClause &MemoClause);
   void CGApproxRuntimeEmitIfInit(CodeGenFunction &CGF,
                                  ApproxIfClause &IfClause);
   void CGApproxRuntimeExitRegion(CodeGenFunction &CGF);
+  void CGApproxRuntimeRegisterInputs(ApproxInClause &InClause);
+  void CGApproxRuntimeRegisterOutputs(ApproxOutClause &OutClause);
+  void CGApproxRuntimeRegisterInputsOutputs(ApproxInOutClause &InOutClause);
+  void CGApproxRuntimeEmitDataValues(CodeGenFunction &CG);
 };
 
 } // namespace CodeGen

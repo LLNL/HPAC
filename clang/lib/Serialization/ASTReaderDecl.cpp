@@ -4002,6 +4002,9 @@ Decl *ASTReader::ReadDeclRecord(DeclID ID) {
     // locations.
     D = ImportDecl::CreateDeserialized(Context, ID, Record.back());
     break;
+  case DECL_APPROX_CAPTUREDEXPR:
+    D = ApproxCapturedExprDecl::CreateDeserialized(Context, ID);
+    break;
   case DECL_OMP_THREADPRIVATE:
     D = OMPThreadPrivateDecl::CreateDeserialized(Context, ID, Record.readInt());
     break;
