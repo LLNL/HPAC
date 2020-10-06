@@ -171,6 +171,12 @@ struct PragmaApproxHandler : public PragmaHandler {
                       Token &FirstToken) override;
 };
 
+struct PragmaNoApproxHandler : public PragmaHandler {
+  PragmaNoApproxHandler() : PragmaHandler("approx") { }
+  void HandlePragma(Preprocessor &PP, PragmaIntroducer Introducer,
+                    Token &FirstToken) override;
+};
+
 struct PragmaNoOpenMPHandler : public PragmaHandler {
   PragmaNoOpenMPHandler() : PragmaHandler("omp") { }
   void HandlePragma(Preprocessor &PP, PragmaIntroducer Introducer,
@@ -429,7 +435,13 @@ void Parser::initializePragmaHandlers() {
   PP.AddPragmaHandler(OpenMPHandler.get());
 
 ///Adding pragma handler for approximate pragmas
-  ApproxHandler = std::make_unique<PragmaApproxHandler>();
+  if ( getLangOpts().Approx ){
+    ApproxHandler = std::make_unique<PragmaApproxHandler>();
+  }
+  else{
+    ApproxHandler = std::make_unique<PragmaNoApproxHandler>();
+  }
+
   PP.AddPragmaHandler(ApproxHandler.get());
 
 
@@ -2612,6 +2624,21 @@ void PragmaNoOpenMPHandler::HandlePragma(Preprocessor &PP,
                                      FirstTok.getLocation())) {
     PP.Diag(FirstTok, diag::warn_pragma_omp_ignored);
     PP.getDiagnostics().setSeverity(diag::warn_pragma_omp_ignored,
+                                    diag::Severity::Ignored, SourceLocation());
+
+  }
+  PP.DiscardUntilEndOfDirective();
+}
+
+/// Handle '#pragma approx ...' when Approx is disabled.
+///
+void PragmaNoApproxHandler::HandlePragma(Preprocessor &PP,
+                                         PragmaIntroducer Introducer,
+                                         Token &FirstTok) {
+  if (!PP.getDiagnostics().isIgnored(diag::warn_pragma_approx_ignored,
+                                     FirstTok.getLocation())) {
+    PP.Diag(FirstTok, diag::warn_pragma_approx_ignored);
+    PP.getDiagnostics().setSeverity(diag::warn_pragma_approx_ignored,
                                     diag::Severity::Ignored, SourceLocation());
   }
   PP.DiscardUntilEndOfDirective();

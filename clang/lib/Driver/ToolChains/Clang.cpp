@@ -6128,6 +6128,11 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
   Args.AddLastArg(CmdArgs, options::OPT_fdiagnostics_show_template_tree);
   Args.AddLastArg(CmdArgs, options::OPT_fno_elide_type);
 
+  // Forward flags of Approx.
+  if (Args.hasFlag(options::OPT_fapprox, options::OPT_fno_approx, false)){
+    CmdArgs.push_back("-fapprox");
+  }
+
   // Forward flags for OpenMP. We don't do this if the current action is an
   // device offloading action other than OpenMP.
   if (Args.hasFlag(options::OPT_fopenmp, options::OPT_fopenmp_EQ,
