@@ -10,6 +10,7 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "CGApproxRuntime.h"
 #include "CodeGenFunction.h"
 #include "clang/AST/ApproxClause.h"
 #include "clang/AST/Expr.h"
@@ -23,8 +24,63 @@ using namespace llvm;
 using namespace clang;
 using namespace CodeGen;
 
-static std::tuple<llvm::Value *, llvm::Value *, llvm::Value *, llvm::Value *,
-                  llvm::Value *>
+int8_t convertToApproxType(const BuiltinType *T) {
+  ApproxType approxType;
+  switch (T->getKind()) {
+  case BuiltinType::Kind::Bool:
+    approxType = BOOL;
+    break;
+  case BuiltinType::Kind::Char_U:
+  case BuiltinType::Kind::UChar:
+  case BuiltinType::Kind::WChar_U:
+    approxType = UCHAR;
+    break;
+  case BuiltinType::Kind::UShort:
+    approxType = USHORT;
+    break;
+  case BuiltinType::Kind::UInt:
+    approxType = UINT;
+    break;
+  case BuiltinType::Kind::ULong:
+    approxType = ULONG;
+    break;
+  case BuiltinType::Kind::ULongLong:
+    approxType = ULONGLONG;
+    break;
+  case BuiltinType::Kind::Char_S:
+  case BuiltinType::Kind::SChar:
+  case BuiltinType::Kind::WChar_S:
+    approxType = SCHAR;
+    break;
+  case BuiltinType::Kind::Short:
+    approxType = SHORT;
+    break;
+  case BuiltinType::Kind::Int:
+    approxType = INT;
+    break;
+  case BuiltinType::Kind::Long:
+    approxType = LONG;
+    break;
+  case BuiltinType::Kind::LongLong:
+    approxType = LONGLONG;
+    break;
+  case BuiltinType::Kind::Float:
+    approxType = FLOAT;
+    break;
+  case BuiltinType::Kind::Double:
+    approxType = DOUBLE;
+    break;
+  case BuiltinType::Kind::LongDouble:
+    approxType = LDOUBLE;
+    break;
+  default:
+    approxType = ApproxType::INVALID;
+    break;
+  }
+  return approxType;
+}
+
+static std::tuple<llvm::Value *, llvm::Value *, llvm::Value *, llvm::Value *>
 getPointerAndSize(CodeGenFunction &CGF, const Expr *E) {
   // Address of first Element.
   llvm::Value *Addr;
@@ -46,7 +102,7 @@ getPointerAndSize(CodeGenFunction &CGF, const Expr *E) {
     QualType BaseTy =
         ApproxArraySectionExpr::getBaseOriginalType(ASE->getBase());
     QualType ResultExprTy = BaseTy;
-    int TyKind = -1;
+    int8_t TyKind = -1;
 
     // Drill down to find the scalar type we are point to.
     do {
@@ -58,7 +114,7 @@ getPointerAndSize(CodeGenFunction &CGF, const Expr *E) {
              ResultExprTy->isArrayType());
 
     if (const BuiltinType *T = ResultExprTy->getAs<BuiltinType>()) {
-      TyKind = T->getKind();
+      TyKind = convertToApproxType(T);
     }
 
     // The array slicer does not yet support multi-dimensional slicing
@@ -86,21 +142,21 @@ getPointerAndSize(CodeGenFunction &CGF, const Expr *E) {
     Size = CGF.Builder.CreateNUWSub(UpIntPtr, LowIntPtr);
     SizeOfElement = CGF.getTypeSize(ResultExprTy);
     NumElements = CGF.Builder.CreateUDiv(Size, SizeOfElement);
-    TypeOfElement = llvm::ConstantInt::get(CGF.Builder.getInt16Ty(), TyKind);
+    TypeOfElement = llvm::ConstantInt::get(CGF.Builder.getInt8Ty(), TyKind);
   } else {
     QualType Ty = E->getType();
     int TyKind = -1;
     if (const BuiltinType *T = Ty->getAs<BuiltinType>()) {
-      TyKind = T->getKind();
+      TyKind = convertToApproxType(T);
     }
 
     SizeOfElement = CGF.getTypeSize(Ty);
     Size = SizeOfElement;
     QualType SizeOfType = CGF.getContext().getSizeType();
     NumElements = llvm::ConstantInt::get(CGF.ConvertType(SizeOfType), 1);
-    TypeOfElement = llvm::ConstantInt::get(CGF.Builder.getInt16Ty(), TyKind);
+    TypeOfElement = llvm::ConstantInt::get(CGF.Builder.getInt8Ty(), TyKind);
   }
-  return std::make_tuple(Addr, Size, NumElements, SizeOfElement, TypeOfElement);
+  return std::make_tuple(Addr, NumElements, SizeOfElement, TypeOfElement);
 }
 
 static FieldDecl *addFieldToRecordDecl(ASTContext &C, DeclContext *DC,
@@ -138,18 +194,16 @@ static void getVarInfoType(ASTContext &C, QualType &VarInfoTy) {
     VarInfoRD->startDefinition();
     /// Void pointer pointing to data values
     addFieldToRecordDecl(C, VarInfoRD, C.getIntPtrType());
-    /// size in bytes
     QualType SizeOfType = C.getSizeType();
     SizeOfType = C.getCanonicalType(SizeOfType);
-    addFieldToRecordDecl(C, VarInfoRD, SizeOfType);
     /// number of elements
     addFieldToRecordDecl(C, VarInfoRD, SizeOfType);
     /// Sizeof(type)
     addFieldToRecordDecl(C, VarInfoRD, SizeOfType);
     /// Data Type can be negative.
     /// The bitwidth will depend on the way we support
-    /// user types/ primary types. Keep it 16 atm.
-    addFieldToRecordDecl(C, VarInfoRD, C.getIntTypeForBitwidth(16, true));
+    /// user types/ primary types. Keep it 8 atm.
+    addFieldToRecordDecl(C, VarInfoRD, C.getIntTypeForBitwidth(8, true));
     /// The directionality of this region in/out/inout
     addFieldToRecordDecl(C, VarInfoRD, C.getIntTypeForBitwidth(8, false));
     VarInfoRD->completeDefinition();
@@ -160,7 +214,8 @@ static void getVarInfoType(ASTContext &C, QualType &VarInfoTy) {
 
 CGApproxRuntime::CGApproxRuntime(CodeGenModule &CGM)
     : CGM(CGM), CallbackFnTy(nullptr), RTFnTy(nullptr), approxRegions(0),
-      StartLoc(SourceLocation()), EndLoc(SourceLocation()) {
+      StartLoc(SourceLocation()), EndLoc(SourceLocation()), requiresData(false),
+      requiresInputs(false) {
   ASTContext &C = CGM.getContext();
   getPerfoInfoType(C, PerfoInfoTy);
   getVarInfoType(C, VarInfoTy);
@@ -170,16 +225,22 @@ CGApproxRuntime::CGApproxRuntime(CodeGenModule &CGM)
   // This is the runtime call function type information, which mirrors the
   // types provided in the argument parameters.
   RTFnTy = llvm::FunctionType::get(
-      CGM.VoidTy,
-      {llvm::PointerType::getUnqual(CallbackFnTy),
-       llvm::PointerType::getUnqual(CallbackFnTy), CGM.VoidPtrTy,
-       llvm::Type::getInt1Ty(CGM.getLLVMContext()), CGM.VoidPtrTy,
-       CGM.VoidPtrTy, CGM.Int32Ty, CGM.Int32Ty},
-      false);
+      CGM.VoidTy, {/* Orig. fn ptr*/ llvm::PointerType::getUnqual(CallbackFnTy),
+                   /* Perfo fn ptr*/ llvm::PointerType::getUnqual(CallbackFnTy),
+                   /* Captured data ptr*/ CGM.VoidPtrTy,
+                   /* Cond Value*/ llvm::Type::getInt1Ty(CGM.getLLVMContext()),
+                   /* Perfo Description */ CGM.VoidPtrTy,
+                   /* Memoization Type*/ CGM.Int32Ty,
+                   /* Input Data Descr*/ CGM.VoidPtrTy,
+                   /* Input Data Num Elements*/ CGM.Int32Ty,
+                   /* Ouput Data Descr. */ CGM.VoidPtrTy,
+                   /* Output Data Num Elements*/ CGM.Int32Ty},false);
 }
 
 void CGApproxRuntime::CGApproxRuntimeEnterRegion(CodeGenFunction &CGF,
                                                  CapturedStmt &CS) {
+  requiresInputs = false;
+  requiresData = false;
   /// Reset All info of the Runtime "state machine"
   for (unsigned i = ARG_START; i < ARG_END; i++)
     approxRTParams[i] = nullptr;
@@ -201,8 +262,11 @@ void CGApproxRuntime::CGApproxRuntimeEnterRegion(CodeGenFunction &CGF,
       CGF.Builder.CreatePointerCast(CapStructAddr.getPointer(), CGM.VoidPtrTy);
   approxRTParams[Cond] = llvm::ConstantInt::get(CGF.Builder.getInt1Ty(), true);
   approxRTParams[PerfoDesc] = llvm::ConstantPointerNull::get(CGM.VoidPtrTy);
-  approxRTParams[DataDesc] = llvm::ConstantPointerNull::get(CGM.VoidPtrTy);
-  approxRTParams[DataSize] =
+  approxRTParams[DataDescIn] = llvm::ConstantPointerNull::get(CGM.VoidPtrTy);
+  approxRTParams[DataSizeIn] =
+      llvm::ConstantInt::get(CGF.Builder.getInt32Ty(), 0);
+  approxRTParams[DataDescOut] = llvm::ConstantPointerNull::get(CGM.VoidPtrTy);
+  approxRTParams[DataSizeOut] =
       llvm::ConstantInt::get(CGF.Builder.getInt32Ty(), 0);
   approxRTParams[MemoDescr] =
       llvm::ConstantInt::get(CGF.Builder.getInt32Ty(), 0);
@@ -262,7 +326,9 @@ void CGApproxRuntime::CGApproxRuntimeEmitPerfoInit(
 
 void CGApproxRuntime::CGApproxRuntimeEmitMemoInit(
     CodeGenFunction &CGF, ApproxMemoClause &MemoClause) {
+  requiresData = true;
   if (MemoClause.getMemoType() == approx::MT_IN) {
+    requiresInputs = true;
     approxRTParams[MemoDescr] =
         llvm::ConstantInt::get(CGF.Builder.getInt32Ty(), 1);
   } else if (MemoClause.getMemoType() == approx::MT_OUT) {
@@ -310,28 +376,30 @@ void CGApproxRuntime::CGApproxRuntimeExitRegion(CodeGenFunction &CGF) {
 
 void CGApproxRuntime::CGApproxRuntimeRegisterInputs(ApproxInClause &InClause) {
   for (auto *V : InClause.varlist()) {
-    Data.push_back(std::make_pair(V, Input));
+    Inputs.push_back(std::make_pair(V, Input));
   }
 }
 
 void CGApproxRuntime::CGApproxRuntimeRegisterOutputs(
     ApproxOutClause &OutClause) {
   for (auto *V : OutClause.varlist()) {
-    Data.push_back(std::make_pair(V, Output));
+    Outputs.push_back(std::make_pair(V, Output));
   }
 }
 
 void CGApproxRuntime::CGApproxRuntimeRegisterInputsOutputs(
     ApproxInOutClause &InOutClause) {
   for (auto *V : InOutClause.varlist()) {
-    Data.push_back(std::make_pair(V, InputOuput));
+    Inputs.push_back(std::make_pair(V, InputOuput));
+    Outputs.push_back(std::make_pair(V, InputOuput));
   }
 }
 
-void CGApproxRuntime::CGApproxRuntimeEmitDataValues(CodeGenFunction &CGF) {
-  /// No Dependencies so exit.
-  if (!Data.size())
-    return;
+std::pair<llvm::Value *, llvm::Value *>
+CGApproxRuntime::CGApproxRuntimeEmitData(
+    CodeGenFunction &CGF,
+    llvm::SmallVector<std::pair<Expr *, Directionality>, 16> &Data,
+    const char *arrayName) {
   int numVars = Data.size();
   ASTContext &C = CGM.getContext();
   QualType VarInfoArrayTy;
@@ -341,25 +409,23 @@ void CGApproxRuntime::CGApproxRuntimeEmitDataValues(CodeGenFunction &CGF) {
   VarInfoArrayTy = C.getConstantArrayType(VarInfoTy, llvm::APInt(64, numVars),
                                           nullptr, ArrayType::Normal, 0);
 
-  Address VarInfoArray =
-      CGF.CreateMemTemp(VarInfoArrayTy, ".dep.approx.arr.addr");
+  Address VarInfoArray = CGF.CreateMemTemp(VarInfoArrayTy, arrayName);
   VarInfoArray = CGF.Builder.CreateConstArrayGEP(VarInfoArray, 0);
 
   const auto *VarInfoRecord = VarInfoTy->getAsRecordDecl();
   unsigned Pos = 0;
-  enum VarInfoFieldID { PTR, SZ_BYTES, NUM_ELEM, SZ_ELEM, DATA_TYPE, DIR };
+  enum VarInfoFieldID { PTR, NUM_ELEM, SZ_ELEM, DATA_TYPE, DIR };
 
   for (auto P : Data) {
     llvm::Value *Addr;
-    llvm::Value *Size;
     llvm::Value *NumElements;
     llvm::Value *TypeOfElement;
     llvm::Value *SizeOfElement;
     Expr *E = P.first;
     Directionality Dir = P.second;
-    std::tie(Addr, Size, NumElements, SizeOfElement, TypeOfElement) =
+    std::tie(Addr, NumElements, SizeOfElement, TypeOfElement) =
         getPointerAndSize(CGF, E);
-    /// Store Addr
+    // Store Addr
     LValue Base = CGF.MakeAddrLValue(
         CGF.Builder.CreateConstGEP(VarInfoArray, Pos), VarInfoTy);
     auto *FieldT = *std::next(VarInfoRecord->field_begin(), PTR);
@@ -367,32 +433,51 @@ void CGApproxRuntime::CGApproxRuntimeEmitDataValues(CodeGenFunction &CGF) {
     CGF.EmitStoreOfScalar(CGF.Builder.CreatePtrToInt(Addr, CGF.IntPtrTy),
                           BaseAddrLVal);
 
-    /// Store SZ_BYTES
-    LValue SzBytesLVal = CGF.EmitLValueForField(
-        Base, *std::next(VarInfoRecord->field_begin(), SZ_BYTES));
-    CGF.EmitStoreOfScalar(Size, SzBytesLVal);
-
-    /// Store NUM_ELEMENTS
+    // Store NUM_ELEMENTS
     LValue nElemLVal = CGF.EmitLValueForField(
         Base, *std::next(VarInfoRecord->field_begin(), NUM_ELEM));
     CGF.EmitStoreOfScalar(NumElements, nElemLVal);
 
-    /// Store SZ_ELEM
+    // Store SZ_ELEM
     LValue sElemLVal = CGF.EmitLValueForField(
         Base, *std::next(VarInfoRecord->field_begin(), SZ_ELEM));
     CGF.EmitStoreOfScalar(SizeOfElement, sElemLVal);
 
+    // Store DATA_TYPE
     LValue typeLVal = CGF.EmitLValueForField(
         Base, *std::next(VarInfoRecord->field_begin(), DATA_TYPE));
     CGF.EmitStoreOfScalar(TypeOfElement, typeLVal);
 
+    // Store Dir
     Value *direction = llvm::ConstantInt::get(CGM.Int8Ty, Dir, false);
     LValue DirLVal = CGF.EmitLValueForField(
         Base, *std::next(VarInfoRecord->field_begin(), DIR));
     CGF.EmitStoreOfScalar(direction, DirLVal);
     Pos++;
   }
-  approxRTParams[DataDesc] = CGF.Builder.CreatePointerBitCastOrAddrSpaceCast(
-      VarInfoArray.getPointer(), CGF.VoidPtrTy);
-  approxRTParams[DataSize] = NumOfElements;
+  return std::make_pair(NumOfElements,
+                        CGF.Builder.CreatePointerBitCastOrAddrSpaceCast(
+                            VarInfoArray.getPointer(), CGF.VoidPtrTy));
+}
+
+void CGApproxRuntime::CGApproxRuntimeEmitDataValues(CodeGenFunction &CGF) {
+  dbgs()<<"I am trying to emit this mofo\n";
+  /// No Dependencies so exit.
+  if (!requiresData)
+    return;
+  dbgs()<<"I am trying to emit this mofo\n";
+
+  llvm::Value *NumOfElements, *ArrayAddress;
+  if (requiresInputs && Inputs.size() > 0) {
+    std::tie(NumOfElements, ArrayAddress) =
+        CGApproxRuntimeEmitData(CGF, Inputs, ".dep.approx_inputs.arr.addr");
+    approxRTParams[DataDescIn] = ArrayAddress;
+    approxRTParams[DataSizeIn] = NumOfElements;
+  }
+
+  // All approximation techniques require the output
+  std::tie(NumOfElements, ArrayAddress) =
+      CGApproxRuntimeEmitData(CGF, Outputs, ".dep.approx_outputs.arr.addr");
+  approxRTParams[DataDescOut] = ArrayAddress;
+  approxRTParams[DataSizeOut] = NumOfElements;
 }

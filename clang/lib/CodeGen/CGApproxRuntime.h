@@ -25,15 +25,23 @@ namespace clang {
 namespace CodeGen {
 class CodeGenModule;
 
+enum ApproxType : int8_t {
+#define APPROX_TYPE(Id, type, name) Id,
+#include "clang/Basic/approxTypes.def"
+  INVALID
+};
+
 enum ApproxRTArgsIndex : uint {
   AccurateFn = 0,
   PerfoFn,
   CapDataPtr,
   Cond,
   PerfoDesc,
-  DataDesc,
-  DataSize,
   MemoDescr,
+  DataDescIn,
+  DataSizeIn,
+  DataDescOut,
+  DataSizeOut,
   ARG_END
 };
 
@@ -57,15 +65,15 @@ private:
   /// of this region.
   ///    typedef struct approx_var_info_t{
   ///        void* ptr;         // Ptr to data
-  ///        size_t sz_bytes;   // size of data in bytes
   ///        size_t num_elem;   // Number of elements
   ///        size_t sz_elem;    // Size of elements in bytes
-  ///        int16_t data_type; // Type of data float/double/int etc.
+  ///        int8_t data_type; // Type of data float/double/int etc.
   ///        uint8_t dir;       // Direction of data: in/out/inout
   ///    } approx_var_info_t;
   QualType VarInfoTy;
   llvm::Value *approxRTParams[ARG_END];
-  llvm::SmallVector<std::pair<Expr *, Directionality>, 16> Data;
+  llvm::SmallVector<std::pair<Expr *, Directionality>, 16> Inputs;
+  llvm::SmallVector<std::pair<Expr *, Directionality>, 16> Outputs;
   // Function type of callback functions.
   llvm::FunctionType *CallbackFnTy;
   // Function type of the runtime interface call.
@@ -73,9 +81,15 @@ private:
   int approxRegions;
   SourceLocation StartLoc;
   SourceLocation EndLoc;
+  bool requiresData;
+  bool requiresInputs;
 
 private:
   void CGApproxRuntimeEmitPerfoFn(CapturedStmt &CS);
+  std::pair<llvm::Value *, llvm::Value *> CGApproxRuntimeEmitData(
+      CodeGenFunction &CGF,
+      llvm::SmallVector<std::pair<Expr *, Directionality>, 16> &Data,
+      const char *arrayName);
 
 public:
   CGApproxRuntime(CodeGenModule &CGM);
