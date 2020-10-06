@@ -1,0 +1,22 @@
+
+#ifndef APPROX_TYPE
+#define APPROX_TYPE(val,descr, str) ;
+#endif
+
+APPROX_TYPE(BOOL, bool, "bool")
+APPROX_TYPE(CHAR, char, "char")
+APPROX_TYPE(SCHAR, int8_t, "signed char")
+APPROX_TYPE(UCHAR, uint8_t, "unsigned char")
+APPROX_TYPE(SHORT, int16_t, "short")
+APPROX_TYPE(USHORT, uint16_t, "unsigned short")
+APPROX_TYPE(INT, int32_t, "int")
+APPROX_TYPE(UINT, uint32_t, "unsigned int")
+APPROX_TYPE(LONG, int64_t, "long")
+APPROX_TYPE(ULONG, uint64_t, "unsigned long")
+APPROX_TYPE(LONGLONG, long long, "long long")
+APPROX_TYPE(ULONGLONG, unsigned long long, "unsigned long long")
+APPROX_TYPE(FLOAT, float, "float")
+APPROX_TYPE(DOUBLE, double, "double")
+APPROX_TYPE(LDOUBLE, long double, "long double")
+
+#undef APPROX_TYPE

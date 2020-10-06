@@ -1,12 +1,17 @@
 configure_file(${LIBAPPROX_INC_DIR}/approx.h approx.h COPYONLY)
 
+set(CLANG_SOURCE_INCLUDE "${LLVM_EXTERNAL_CLANG_SOURCE_DIR}/include/")
+
 include_directories(
     ${CMAKE_CURRENT_BINARY_DIR}
     ${LIBAPPROX_INC_DIR}
+    ${CLANG_SOURCE_INCLUDE}
 )
 
 set(LIBAPPROX_SOURCE_FILES
     approx_runtime.cpp
+    approx_data_util.cpp
+    approx_memoize_out.cpp
 )
 
 #We might need to use CXX as linker.
