@@ -12,6 +12,7 @@ set(LIBAPPROX_SOURCE_FILES
     approx_runtime.cpp
     approx_data_util.cpp
     approx_memoize_out.cpp
+    approx_memoize_iact_in.cpp
 )
 
 #We might need to use CXX as linker.

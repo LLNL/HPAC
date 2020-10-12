@@ -12,5 +12,6 @@ void multiply(void *product, void *multiplier, void *multiplicand, ApproxType Ty
 void divide(void *quotient, void *dividend, void *divisor, ApproxType Type, size_t numElements);
 double average(void *dataPtr, size_t numElements, ApproxType Type);
 const char *getTypeName(ApproxType Type);
+void copyData(void *dest, void *src, size_t numElements, ApproxType Type);
 
 #endif

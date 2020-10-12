@@ -65,9 +65,11 @@ int8_t convertToApproxType(const BuiltinType *T) {
     approxType = LONGLONG;
     break;
   case BuiltinType::Kind::Float:
+    dbgs()<< "Found float Type\n";
     approxType = FLOAT;
     break;
   case BuiltinType::Kind::Double:
+    dbgs()<< "Found double Type\n";
     approxType = DOUBLE;
     break;
   case BuiltinType::Kind::LongDouble:
@@ -75,6 +77,7 @@ int8_t convertToApproxType(const BuiltinType *T) {
     break;
   default:
     approxType = ApproxType::INVALID;
+    dbgs()<< "Found INVALID Type\n";
     break;
   }
   return approxType;
@@ -461,11 +464,9 @@ CGApproxRuntime::CGApproxRuntimeEmitData(
 }
 
 void CGApproxRuntime::CGApproxRuntimeEmitDataValues(CodeGenFunction &CGF) {
-  dbgs()<<"I am trying to emit this mofo\n";
   /// No Dependencies so exit.
   if (!requiresData)
     return;
-  dbgs()<<"I am trying to emit this mofo\n";
 
   llvm::Value *NumOfElements, *ArrayAddress;
   if (requiresInputs && Inputs.size() > 0) {
