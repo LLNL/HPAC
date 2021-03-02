@@ -25,7 +25,7 @@ const std::string ApproxClause::Name[approx::CK_END] = {
     "perfo", "memo", "dt", "nn", "user", "if", "in", "out", "inout", "label"};
 
 const std::string ApproxPerfoClause::PerfoName[approx::PT_END] = {
-    "small", "large", "rand", "init", "final"};
+    "small", "large", "rand", "init", "fini"};
 
 const std::string ApproxMemoClause::MemoName[approx::MT_END] = {
     "in", "out"};
