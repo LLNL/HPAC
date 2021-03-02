@@ -3193,6 +3193,10 @@ public:
   Address GenerateCapturedStmtArgument(const CapturedStmt &S);
   llvm::Function *GenerateOpenMPCapturedStmtFunction(const CapturedStmt &S,
                                                      SourceLocation Loc);
+  llvm::Function *
+  GeneratePerfoCapturedStmtFunction(const CapturedStmt &S,
+                                    const ApproxLoopHelperExprs &LoopExprs,
+                                    const ApproxPerfoClause &PC);
   void GenerateOpenMPCapturedVars(const CapturedStmt &S,
                                   SmallVectorImpl<llvm::Value *> &CapturedVars);
   void emitOMPSimpleStore(LValue LVal, RValue RVal, QualType RValTy,

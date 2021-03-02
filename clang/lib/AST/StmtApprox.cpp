@@ -31,7 +31,8 @@ ApproxDirective *ApproxDirective::Create(const ASTContext &C,
                                          SourceLocation StartLoc,
                                          SourceLocation EndLoc,
                                          Stmt *AssociatedStmt,
-                                         ArrayRef<ApproxClause *> Clauses) {
+                                         ArrayRef<ApproxClause *> Clauses,
+                                         const ApproxLoopHelperExprs &B) {
   unsigned Size =
       llvm::alignTo(sizeof(ApproxDirective), alignof(ApproxClause *));
   void *Mem = C.Allocate(Size + sizeof(ApproxClause *) * Clauses.size() +
@@ -40,5 +41,6 @@ ApproxDirective *ApproxDirective::Create(const ASTContext &C,
       ApproxDirective(ApproxDirectiveClass, StartLoc, EndLoc, Clauses.size());
   AD->setClauses(Clauses);
   AD->setAssociatedStmt(AssociatedStmt);
+  AD->LoopExprs = B;
   return AD;
 }

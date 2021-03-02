@@ -4,6 +4,7 @@
 #include <cstdlib>
 #include <chrono>
 #include <unordered_map>
+#include <random>
 
 #include <approx.h>
 #include <approx_data_util.h>
@@ -50,40 +51,6 @@ void _printdeps(approx_var_info_t *vars, int num_deps) {
   }
 }
 
-class ApproxRuntimeConfiguration{
-  ExecuteMode Mode;
-  public:
-  Profiler profiler;
-  BaseDataWriter *data_profiler;
-
-    ApproxRuntimeConfiguration(){
-      const char *env_p = std::getenv("EXECUTE_MODE");
-      if (!env_p){
-        Mode = EXECUTE;
-        return;
-      }
-
-      if (strcmp(env_p, "TIME_PROFILE") == 0){
-        Mode = PROFILE_TIME;
-      }
-      else if ( strcmp(env_p, "DATA_PROFILE") == 0 ){
-        Mode = PROFILE_DATA;
-        data_profiler = new HDF5DataWriter();
-      }
-      else{
-        Mode = EXECUTE;
-      }
-    }
-
-    ~ApproxRuntimeConfiguration(){
-      delete data_profiler;
-    }
-
-    ExecuteMode getMode(){return Mode;}
-};
-
-ApproxRuntimeConfiguration RTEnv;
-
 void __approx_exec_call(void (*accurate)(void *), void (*perforate)(void *),
                         void *arg, bool cond,  const char *region_name, void *perfoArgs, int memo_type,
                         void *inputs, int num_inputs, void *outputs,
@@ -97,10 +64,17 @@ void __approx_exec_call(void (*accurate)(void *), void (*perforate)(void *),
   _printdeps(output_vars, num_outputs);
 
   if (cond) {
-    if (memo_type == MEMO_IN) {
+    if (perfFn) {
+      printf("CALLING cond perforated function\n");
+      perfFn(arg);
+    }
+    else if (memo_type == MEMO_IN) {
       memoize_in(accurate, arg, input_vars, num_inputs, output_vars, num_outputs);
     } else if (memo_type == MEMO_OUT) {
       memoize_out(accurate, arg, output_vars, num_outputs);
+    }
+    else{
+      accurate(arg);
     }
   } else {
     accurate(arg);

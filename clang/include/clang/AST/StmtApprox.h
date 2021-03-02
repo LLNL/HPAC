@@ -21,6 +21,49 @@
 
 namespace clang {
 
+struct ApproxLoopHelperExprs {
+  /// Loop iteration variable.
+  Expr *IterationVarRef;
+  /// Loop last iteration number.
+  Expr *LastIteration;
+  /// Loop number of iterations.
+  Expr *NumIterations;
+  /// Calculation of last iteration.
+  Expr *CalcLastIteration;
+  /// Loop pre-condition.
+  Expr *PreCond;
+  /// Loop condition.
+  Expr *Cond;
+  /// Loop iteration variable init.
+  Expr *Init;
+  /// Loop increment.
+  Expr *Inc;
+  /// IsLastIteration - local flag variable passed to runtime.
+  Expr *IL;
+  /// LowerBound - local variable passed to runtime.
+  Expr *LB;
+  /// UpperBound - local variable passed to runtime.
+  Expr *UB;
+  /// Stride - local variable passed to runtime.
+  Expr *ST;
+  /// EnsureUpperBound -- expression UB = min(UB, NumIterations).
+  Expr *EUB;
+  /// Counters Loop counters.
+  //SmallVector<Expr *, 4> Counters;
+  Expr *Counter;
+  /// Expressions for loop counter init for CodeGen.
+  Expr *CounterInit;
+  /// Expressions for loop counter update for CodeGen.
+  Expr *CounterUpdate;
+  /// Final loop counter value for CodeGen.
+  //Expr *CounterFinal;
+  // Random perforation condition for CodeGen.
+  // TODO: Remove, if codegen builds call to __approx_skip_iteration instead of sema.
+  Expr *PerfoRandCond;
+  /// Init statement for all captured expressions.
+  Stmt *PreInits;
+};
+
 class ApproxDirective : public Stmt {
   friend class ASTStmtReader;
 
@@ -51,7 +94,7 @@ protected:
 public:
   static ApproxDirective *Create(const ASTContext &C, SourceLocation StartLoc,
                                 SourceLocation EndLoc, Stmt *AssociatedStmt,
-                                ArrayRef<ApproxClause *> Clauses);
+                                ArrayRef<ApproxClause *> Clauses, const ApproxLoopHelperExprs &B);
   /// Returns starting location of directive kind.
   SourceLocation getBeginLoc() const { return StartLoc; }
   /// Returns ending location of directive.
@@ -100,6 +143,8 @@ public:
 
   void setClauses(ArrayRef<ApproxClause*> Clauses);
 
+  /// The expressions built for the approx perfo codegen.
+  ApproxLoopHelperExprs LoopExprs;
 };
 
 } // end namespace clang

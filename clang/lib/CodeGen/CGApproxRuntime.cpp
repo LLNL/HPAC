@@ -293,8 +293,9 @@ void CGApproxRuntime::CGApproxRuntimeEnterRegion(CodeGenFunction &CGF,
   return;
 }
 
+// TODO: Should we add LoopExprs to the PerfoClause?
 void CGApproxRuntime::CGApproxRuntimeEmitPerfoInit(
-    CodeGenFunction &CGF, CapturedStmt &CS, ApproxPerfoClause &PerfoClause) {
+    CodeGenFunction &CGF, CapturedStmt &CS, ApproxPerfoClause &PerfoClause, const ApproxLoopHelperExprs &LoopExprs) {
   enum PerfoInfoFieldID { FlagsId, ApproxRegionId, StepId, RateId };
   Value *StepVal = nullptr;
   Expr *Step = nullptr;
@@ -338,7 +339,7 @@ void CGApproxRuntime::CGApproxRuntimeEmitPerfoInit(
   approxRTParams[PerfoDesc] = CGF.Builder.CreatePointerBitCastOrAddrSpaceCast(
       PerfoStructAddress.getPointer(), CGM.VoidPtrTy);
   /// Emit Function which needs to be perforated.
-  CGApproxRuntimeEmitPerfoFn(CS);
+  CGApproxRuntimeEmitPerfoFn(CS, LoopExprs, PerfoClause);
 }
 
 void CGApproxRuntime::CGApproxRuntimeEmitMemoInit(
@@ -364,15 +365,250 @@ void CGApproxRuntime::CGApproxRuntimeEmitIfInit(CodeGenFunction &CGF,
   approxRTParams[Cond] = CGF.EvaluateExprAsBool(IfClause.getCondition());
 }
 
-void CGApproxRuntime::CGApproxRuntimeEmitPerfoFn(CapturedStmt &CS) {
+/// Creates the outlined function for a perforated loop.
+llvm::Function *CodeGenFunction::GeneratePerfoCapturedStmtFunction(
+    const CapturedStmt &CS, const ApproxLoopHelperExprs &LoopExprs,
+    const ApproxPerfoClause &PC) {
+  assert(CapturedStmtInfo &&
+    "CapturedStmtInfo should be set when generating the captured function");
+  const CapturedDecl *CD = CS.getCapturedDecl();
+  const RecordDecl *RD = CS.getCapturedRecordDecl();
+  SourceLocation Loc = CS.getBeginLoc();
+  assert(CD->hasBody() && "missing CapturedDecl body");
+
+  // Build the argument list.
+  ASTContext &Ctx = CGM.getContext();
+  FunctionArgList Args;
+  Args.append(CD->param_begin(), CD->param_end());
+
+  // Create the function declaration.
+  const CGFunctionInfo &FuncInfo =
+    CGM.getTypes().arrangeBuiltinFunctionDeclaration(Ctx.VoidTy, Args);
+  llvm::FunctionType *FuncLLVMTy = CGM.getTypes().GetFunctionType(FuncInfo);
+
+  llvm::Function *F =
+    llvm::Function::Create(FuncLLVMTy, llvm::GlobalValue::InternalLinkage,
+                           CapturedStmtInfo->getHelperName(), &CGM.getModule());
+  CGM.SetInternalFunctionAttributes(CD, F, FuncInfo);
+  if (CD->isNothrow())
+    F->addFnAttr(llvm::Attribute::NoUnwind);
+
+  // Generate the function.
+  StartFunction(CD, Ctx.VoidTy, F, FuncInfo, Args, CD->getLocation(),
+                CD->getBody()->getBeginLoc());
+  // Set the context parameter in CapturedStmtInfo.
+  Address DeclPtr = GetAddrOfLocalVar(CD->getContextParam());
+  CapturedStmtInfo->setContextValue(Builder.CreateLoad(DeclPtr));
+
+  // Initialize variable-length arrays.
+  LValue Base = MakeNaturalAlignAddrLValue(CapturedStmtInfo->getContextValue(),
+                                           Ctx.getTagDeclType(RD));
+  for (auto *FD : RD->fields()) {
+    if (FD->hasCapturedVLAType()) {
+      auto *ExprArg =
+          EmitLoadOfLValue(EmitLValueForField(Base, FD), CS.getBeginLoc())
+              .getScalarVal();
+      auto VAT = FD->getCapturedVLAType();
+      VLASizeMap[VAT->getSizeExpr()] = ExprArg;
+    }
+  }
+
+  // If 'this' is captured, load it into CXXThisValue.
+  if (CapturedStmtInfo->isCXXThisExprCaptured()) {
+    FieldDecl *FD = CapturedStmtInfo->getThisFieldDecl();
+    LValue ThisLValue = EmitLValueForField(Base, FD);
+    CXXThisValue = EmitLoadOfLValue(ThisLValue, Loc).getScalarVal();
+  }
+
+  PGO.assignRegionCounters(GlobalDecl(CD), F);
+
+  // Declare IV, LastIteration, LB, UB variables.
+  const auto *IVExpr = cast<DeclRefExpr>(LoopExprs.IterationVarRef);
+  const auto *IVDecl = cast<VarDecl>(IVExpr->getDecl());
+  EmitVarDecl(*IVDecl);
+
+  if (const auto *LIExpr = dyn_cast<DeclRefExpr>(LoopExprs.LastIteration)) {
+    EmitVarDecl(*cast<VarDecl>(LIExpr->getDecl()));
+    // Emit calculation of the iterations count.
+    EmitIgnoredExpr(LoopExprs.CalcLastIteration);
+  }
+
+  const auto *LBExpr = cast<DeclRefExpr>(LoopExprs.LB);
+  const auto *LBDecl = cast<VarDecl>(LBExpr->getDecl());
+  EmitVarDecl(*LBDecl);
+
+  // Emit variable declarations of PreInits.
+  if (const auto *PreInits = cast_or_null<DeclStmt>(LoopExprs.PreInits)) {
+    for (const auto *I : PreInits->decls())
+      EmitVarDecl(cast<VarDecl>(*I));
+  }
+
+  const auto *UBExpr = cast<DeclRefExpr>(LoopExprs.UB);
+  const auto *UBDecl = cast<VarDecl>(UBExpr->getDecl());
+  EmitVarDecl(*UBDecl);
+
+  //EmitIgnoredExpr(LoopExprs.EUB);
+  // IV = LB;
+  EmitIgnoredExpr(LoopExprs.Init);
+
+  const auto *CounterExpr = cast<DeclRefExpr>(LoopExprs.Counter);
+  const auto *CounterDecl = cast<VarDecl>(CounterExpr->getDecl());
+  // Emit counter declaration and init if it is not captured.
+  if (!CS.capturesVariable(CounterDecl)) {
+    EmitVarDecl(*CounterDecl);
+    EmitIgnoredExpr(LoopExprs.CounterInit);
+  }
+
+  // Create BBs for end of the loop and condition check.
+  auto LoopExit = getJumpDestInCurrentScope("approx.perfo.for.end");
+  auto CondBlock = createBasicBlock("approx.perfo.for.cond");
+  EmitBlock(CondBlock);
+  const SourceRange R = CS.getSourceRange();
+
+  LoopStack.push(CondBlock, SourceLocToDebugLoc(R.getBegin()),
+                 SourceLocToDebugLoc(R.getEnd()));
+
+  llvm::BasicBlock *ExitBlock = LoopExit.getBlock();
+  llvm::BasicBlock *LoopBody = createBasicBlock("approx.perfo.for.body");
+  llvm::BasicBlock *PerfRandCondBlock = createBasicBlock("approx.perfo.for.rand.cond");
+  auto *LoopCond = LoopExprs.Cond;
+  // Emit condition.
+  EmitBranchOnBoolExpr(LoopCond, PerfRandCondBlock, ExitBlock, getProfileCount(&CS));
+  if (ExitBlock != LoopExit.getBlock()) {
+    EmitBlock(ExitBlock);
+    EmitBranchThroughCleanup(LoopExit);
+  }
+
+  // Create a block for the increment.
+  JumpDest Continue = getJumpDestInCurrentScope("approx.perfo.for.inc");
+  BreakContinueStack.push_back(BreakContinue(LoopExit, Continue));
+
+  EmitBlock(PerfRandCondBlock);
+  // Emit perfo rand cond basic block.
+  if(PC.getPerfoType() == approx::PT_RAND) {
+    // Skip iteration if true.
+  #if 0
+    EmitBranchOnBoolExpr(LoopExprs.PerfoRandCond, Continue.getBlock(), LoopBody, getProfileCount(&CS));
+
+    // Alternative codegen
+  #else
+    StringRef FnName("__approx_skip_iteration");
+    llvm::Function *Fn = CGM.getModule().getFunction(FnName);
+    llvm::FunctionType *FnTy = llvm::FunctionType::get(
+        llvm::Type::getInt1Ty(CGM.getLLVMContext()), {CGM.Int32Ty, CGM.FloatTy},
+        /* VarArgs */ false);
+    if (!Fn) {
+      Fn = Function::Create(FnTy, GlobalValue::ExternalLinkage, FnName,
+                              CGM.getModule());
+    }
+
+    llvm::Value *IV = EmitLoadOfScalar(EmitLValue(LoopExprs.IterationVarRef), SourceLocation());
+    llvm::Value *Pr = EmitScalarExpr(PC.getStep());
+    llvm::FunctionCallee FnCallee({FnTy, Fn});
+    llvm::Value *Ret = EmitRuntimeCall(FnCallee, { IV, Pr });
+    Builder.CreateCondBr(Ret, Continue.getBlock(), LoopBody);
+#endif
+  } else {
+    EmitBranch(LoopBody);
+  }
+
+  EmitBlock(LoopBody);
+  incrementProfileCounter(&CS);
+
+  // Emit counter update.
+  EmitIgnoredExpr(LoopExprs.CounterUpdate);
+
+  auto emitBody = [&](auto &&emitBody, const Stmt *S, const Stmt *LoopS) -> void {
+    const Stmt *SimplifiedS = S->IgnoreContainers();
+    if (const auto *CompS = dyn_cast<CompoundStmt>(SimplifiedS)) {
+      // Keep track of the current cleanup stack depth, including debug scopes.
+      //CodeGenFunction::LexicalScope Scope(CGF, S->getSourceRange());
+      for (const Stmt *CurStmt : CompS->body())
+        emitBody(emitBody, CurStmt, LoopS);
+      return;
+    }
+
+    // Emit only the body of the loop statement.
+    if (S == LoopS) {
+      if (const auto *For = dyn_cast<ForStmt>(S)) {
+        S = For->getBody();
+      } else {
+        assert(isa<CXXForRangeStmt>(S) &&
+               "Expected canonical for loop or range-based for loop.");
+        const auto *CXXFor = cast<CXXForRangeStmt>(S);
+        EmitStmt(CXXFor->getLoopVarStmt());
+        S = CXXFor->getBody();
+      }
+    }
+
+    EmitStmt(S);
+  };
+
+  const Stmt *S = CS.getCapturedStmt();
+  const Stmt *LoopS = S->IgnoreContainers();
+  emitBody(emitBody, S, LoopS);
+
+  // Emit "IV = IV + 1" and a back-edge to the condition block.
+  EmitBlock(Continue.getBlock());
+  auto *IncExpr = LoopExprs.Inc;
+  EmitIgnoredExpr(IncExpr);
+  BreakContinueStack.pop_back();
+  EmitBranch(CondBlock);
+
+  LoopStack.pop();
+  // Emit the fall-through block.
+  EmitBlock(LoopExit.getBlock());
+
+  FinishFunction(CD->getBodyRBrace());
+
+  return F;
+}
+
+void CGApproxRuntime::CGApproxRuntimeEmitPerfoFn(
+    CapturedStmt &CS, const ApproxLoopHelperExprs &LoopExprs,
+    const ApproxPerfoClause &PC) {
   CodeGenFunction::CGCapturedStmtInfo CGSI(CS);
   CodeGenFunction CGF(CGM, true);
   CodeGenFunction::CGCapturedStmtRAII CapInfoRAII(CGF, &CGSI);
-  llvm::Function *Fn = CGF.GenerateCapturedStmtFunction(CS);
-  /// When we decide how the Interaction of the Attributes will work with LLVM
-  /// we will add extra information here.
-  Fn->addFnAttr("Perforate");
-  approxRTParams[AccurateFn] =
+
+#if DEBUG
+  // GG: print loop expressions.
+  dbgs() << "============ Loop Exprs =============\n";
+  dbgs() << "=== IterationVarRef ===\n";
+  LoopExprs.IterationVarRef->dump();
+  dbgs() << "=== LastIteration ===\n";
+  LoopExprs.LastIteration->dump();
+  dbgs() << "=== NumIterations ===\n";
+  LoopExprs.NumIterations->dump();
+  dbgs() << "=== CalcLastIteration ===\n";
+  LoopExprs.CalcLastIteration->dump();
+  dbgs() << "=== PreCond ===\n";
+  LoopExprs.PreCond->dump();
+  dbgs() << "=== PreInits ===\n";
+  LoopExprs.PreInits->dump();
+  dbgs() << "=== Cond ===\n";
+  LoopExprs.Cond->dump();
+  dbgs() << "=== Init ===\n";
+  LoopExprs.Init->dump();
+  dbgs() << "=== Inc ===\n";
+  LoopExprs.Inc->dump();
+  dbgs() << "=== LB ===\n";
+  LoopExprs.LB->dump();
+  dbgs() << "=== UB ===\n";
+  LoopExprs.UB->dump();
+  dbgs() << "=== ST ===\n";
+  LoopExprs.ST->dump();
+  dbgs() << "=== Counter\n";
+  LoopExprs.Counter->dump();
+  dbgs() << "=== CounterInit\n";
+  LoopExprs.CounterInit->dump();
+  dbgs() << "=== CounterUpdate\n";
+  LoopExprs.CounterUpdate->dump();
+  dbgs() << "========= End of Loop Exprs =========\n";
+#endif
+
+  llvm::Function *Fn = CGF.GeneratePerfoCapturedStmtFunction(CS, LoopExprs, PC);
+  approxRTParams[PerfoFn] =
       CGF.Builder.CreatePointerCast(Fn, CallbackFnTy->getPointerTo());
   return;
 }

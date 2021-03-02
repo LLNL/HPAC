@@ -31,7 +31,7 @@ void CodeGenFunction::EmitApproxDirective(const ApproxDirective &AD) {
       RT.CGApproxRuntimeEmitIfInit(*this, *IfClause);
     }
     else if (ApproxPerfoClause *PerfoClause = dyn_cast_or_null<ApproxPerfoClause>(C)){
-      RT.CGApproxRuntimeEmitPerfoInit(*this, *CStmt, *PerfoClause);
+      RT.CGApproxRuntimeEmitPerfoInit(*this, *CStmt, *PerfoClause, AD.LoopExprs);
     }
     else if (ApproxInClause *InClause = dyn_cast_or_null<ApproxInClause>(C)){
       RT.CGApproxRuntimeRegisterInputs(*InClause);
