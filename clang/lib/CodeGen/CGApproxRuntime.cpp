@@ -503,7 +503,20 @@ llvm::Function *CodeGenFunction::GeneratePerfoCapturedStmtFunction(
     }
 
     llvm::Value *IV = EmitLoadOfScalar(EmitLValue(LoopExprs.IterationVarRef), SourceLocation());
-    llvm::Value *Pr = EmitScalarExpr(PC.getStep());
+    llvm::Value *Pr = nullptr;
+    // Emit rand step declaration, if there is one.
+    if (const auto *RandStepExpr = dyn_cast<DeclRefExpr>(PC.getStep())) {
+      if (const auto *RandStepDecl =
+              dyn_cast<VarDecl>(RandStepExpr->getDecl())) {
+        if (!CS.capturesVariable(RandStepDecl))
+          EmitVarDecl(*RandStepDecl);
+        Pr = EmitLoadOfScalar(EmitLValue(RandStepExpr), SourceLocation());
+      }
+    } else
+      Pr = EmitScalarExpr(PC.getStep());
+
+    assert(Pr != nullptr && "Expected a non-null Pr value");
+
     llvm::FunctionCallee FnCallee({FnTy, Fn});
     llvm::Value *Ret = EmitRuntimeCall(FnCallee, { IV, Pr });
     Builder.CreateCondBr(Ret, Continue.getBlock(), LoopBody);
