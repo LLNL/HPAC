@@ -1987,8 +1987,8 @@ ApproxClause *Sema::ActOnApproxLabelClause(ClauseKind Kind, ApproxVarListLocTy &
 
   labelExpr = MakeFullExpr(labelExpr).get();
   llvm::MapVector<const Expr *, DeclRefExpr *> Captures;
-  tryBuildApproxCapture(*this, labelExpr, Captures);
-  PreInitStmt = buildApproxPreInits(Context, Captures);
+  tryBuildCapture(*this, labelExpr, Captures);
+  PreInitStmt = buildPreInits(Context, Captures);
   return new (Context) ApproxLabelClause(StartLoc, EndLoc, LParenLoc, PreInitStmt, Label);
 }
 
