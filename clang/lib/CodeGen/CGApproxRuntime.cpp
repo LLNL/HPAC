@@ -265,6 +265,9 @@ void CGApproxRuntime::CGApproxRuntimeEnterRegion(CodeGenFunction &CGF,
   CodeGenFunction::CGCapturedStmtInfo CGSI(CS);
   CodeGenFunction localCGF(CGM, true);
   CodeGenFunction::CGCapturedStmtRAII CapInfoRAII(localCGF, &CGSI);
+  dbgs() << "=== Codegen CS\n";
+  CS.dump();
+  dbgs() << "=== End of Codegen CS\n";
   llvm::Function *Fn = localCGF.GenerateCapturedStmtFunction(CS);
 
   /// Fill in parameters of runtime function call
@@ -447,7 +450,7 @@ llvm::Function *CodeGenFunction::GeneratePerfoCapturedStmtFunction(
   const auto *UBDecl = cast<VarDecl>(UBExpr->getDecl());
   EmitVarDecl(*UBDecl);
 
-  //EmitIgnoredExpr(LoopExprs.EUB);
+  // EmitIgnoredExpr(LoopExprs.EUB);
   // IV = LB;
   EmitIgnoredExpr(LoopExprs.Init);
 
@@ -459,109 +462,132 @@ llvm::Function *CodeGenFunction::GeneratePerfoCapturedStmtFunction(
     EmitIgnoredExpr(LoopExprs.CounterInit);
   }
 
-  // Create BBs for end of the loop and condition check.
-  auto LoopExit = getJumpDestInCurrentScope("approx.perfo.for.end");
-  auto CondBlock = createBasicBlock("approx.perfo.for.cond");
-  EmitBlock(CondBlock);
-  const SourceRange R = CS.getSourceRange();
-
-  LoopStack.push(CondBlock, SourceLocToDebugLoc(R.getBegin()),
-                 SourceLocToDebugLoc(R.getEnd()));
-
-  llvm::BasicBlock *ExitBlock = LoopExit.getBlock();
-  llvm::BasicBlock *LoopBody = createBasicBlock("approx.perfo.for.body");
-  llvm::BasicBlock *PerfRandCondBlock = createBasicBlock("approx.perfo.for.rand.cond");
-  auto *LoopCond = LoopExprs.Cond;
-  // Emit condition.
-  EmitBranchOnBoolExpr(LoopCond, PerfRandCondBlock, ExitBlock, getProfileCount(&CS));
-  if (ExitBlock != LoopExit.getBlock()) {
-    EmitBlock(ExitBlock);
-    EmitBranchThroughCleanup(LoopExit);
+  if(LoopExprs.OMPParallelForDir) {
+    EmitStmt(LoopExprs.OMPParallelForDir);
   }
+  else {
+    // Create BBs for end of the loop and condition check.
+    auto LoopExit = getJumpDestInCurrentScope("approx.perfo.for.end");
+    auto CondBlock = createBasicBlock("approx.perfo.for.cond");
+    EmitBlock(CondBlock);
+    const SourceRange R = CS.getSourceRange();
 
-  // Create a block for the increment.
-  JumpDest Continue = getJumpDestInCurrentScope("approx.perfo.for.inc");
-  BreakContinueStack.push_back(BreakContinue(LoopExit, Continue));
+    LoopStack.push(CondBlock, SourceLocToDebugLoc(R.getBegin()),
+                   SourceLocToDebugLoc(R.getEnd()));
 
-  EmitBlock(PerfRandCondBlock);
-  // Emit perfo rand cond basic block.
-  if(PC.getPerfoType() == approx::PT_RAND) {
-    // Skip iteration if true.
-    StringRef FnName("__approx_skip_iteration");
-    llvm::Function *Fn = CGM.getModule().getFunction(FnName);
-    llvm::FunctionType *FnTy = llvm::FunctionType::get(
-        llvm::Type::getInt1Ty(CGM.getLLVMContext()), {CGM.Int32Ty, CGM.FloatTy},
-        /* VarArgs */ false);
-    if (!Fn) {
-      Fn = Function::Create(FnTy, GlobalValue::ExternalLinkage, FnName,
+    llvm::BasicBlock *ExitBlock = LoopExit.getBlock();
+    llvm::BasicBlock *LoopBody = createBasicBlock("approx.perfo.for.body");
+    llvm::BasicBlock *PerfRandCondBlock =
+        createBasicBlock("approx.perfo.for.rand.cond");
+    auto *LoopCond = LoopExprs.Cond;
+    // Emit condition.
+    EmitBranchOnBoolExpr(LoopCond, PerfRandCondBlock, ExitBlock,
+                         getProfileCount(&CS));
+    if (ExitBlock != LoopExit.getBlock()) {
+      EmitBlock(ExitBlock);
+      EmitBranchThroughCleanup(LoopExit);
+    }
+
+    // Create a block for the increment.
+    JumpDest Continue = getJumpDestInCurrentScope("approx.perfo.for.inc");
+    BreakContinueStack.push_back(BreakContinue(LoopExit, Continue));
+
+    EmitBlock(PerfRandCondBlock);
+    // Emit perfo rand cond basic block.
+    #if 0
+    if (PC.getPerfoType() == approx::PT_RAND) {
+      // Skip iteration if true.
+      StringRef FnName("__approx_skip_iteration");
+      llvm::Function *Fn = CGM.getModule().getFunction(FnName);
+      llvm::FunctionType *FnTy =
+          llvm::FunctionType::get(llvm::Type::getInt1Ty(CGM.getLLVMContext()),
+                                  {CGM.Int32Ty, CGM.FloatTy},
+                                  /* VarArgs */ false);
+      if (!Fn) {
+        Fn = Function::Create(FnTy, GlobalValue::ExternalLinkage, FnName,
                               CGM.getModule());
-    }
-
-    llvm::Value *IV = EmitLoadOfScalar(EmitLValue(LoopExprs.IterationVarRef), SourceLocation());
-    llvm::Value *Pr = nullptr;
-
-    // Emit Pr expression, either loading from a captured DRE or evaluating it.
-    if (dyn_cast<DeclRefExpr>(LoopExprs.PerfoStep)) {
-      Pr = EmitLoadOfScalar(EmitLValue(LoopExprs.PerfoStep),
-                            SourceLocation());
-    } else
-      Pr = EmitScalarExpr(LoopExprs.PerfoStep);
-
-    assert(Pr != nullptr && "Expected a non-null Pr value");
-
-    llvm::FunctionCallee FnCallee({FnTy, Fn});
-    llvm::Value *Ret = EmitRuntimeCall(FnCallee, { IV, Pr });
-    Builder.CreateCondBr(Ret, Continue.getBlock(), LoopBody);
-  } else {
-    EmitBranch(LoopBody);
-  }
-
-  EmitBlock(LoopBody);
-  incrementProfileCounter(&CS);
-
-  // Emit counter update.
-  EmitIgnoredExpr(LoopExprs.CounterUpdate);
-
-  auto emitBody = [&](auto &&emitBody, const Stmt *S, const Stmt *LoopS) -> void {
-    const Stmt *SimplifiedS = S->IgnoreContainers();
-    if (const auto *CompS = dyn_cast<CompoundStmt>(SimplifiedS)) {
-      // Keep track of the current cleanup stack depth, including debug scopes.
-      //CodeGenFunction::LexicalScope Scope(CGF, S->getSourceRange());
-      for (const Stmt *CurStmt : CompS->body())
-        emitBody(emitBody, CurStmt, LoopS);
-      return;
-    }
-
-    // Emit only the body of the loop statement.
-    if (S == LoopS) {
-      if (const auto *For = dyn_cast<ForStmt>(S)) {
-        S = For->getBody();
-      } else {
-        assert(isa<CXXForRangeStmt>(S) &&
-               "Expected canonical for loop or range-based for loop.");
-        const auto *CXXFor = cast<CXXForRangeStmt>(S);
-        EmitStmt(CXXFor->getLoopVarStmt());
-        S = CXXFor->getBody();
       }
+
+      llvm::Value *IV = EmitLoadOfScalar(EmitLValue(LoopExprs.IterationVarRef),
+                                         SourceLocation());
+      llvm::Value *Pr = nullptr;
+
+      // Emit Pr expression, either loading from a captured DRE or evaluating
+      // it.
+      if (dyn_cast<DeclRefExpr>(LoopExprs.PerfoStep)) {
+        Pr =
+            EmitLoadOfScalar(EmitLValue(LoopExprs.PerfoStep), SourceLocation());
+      } else
+        Pr = EmitScalarExpr(LoopExprs.PerfoStep);
+
+      assert(Pr != nullptr && "Expected a non-null Pr value");
+
+      llvm::FunctionCallee FnCallee({FnTy, Fn});
+      llvm::Value *Ret = EmitRuntimeCall(FnCallee, {IV, Pr});
+      Builder.CreateCondBr(Ret, Continue.getBlock(), LoopBody);
+    } else {
+      EmitBranch(LoopBody);
     }
+    #endif
 
-    EmitStmt(S);
-  };
+    EmitBlock(LoopBody);
+    incrementProfileCounter(&CS);
 
-  const Stmt *S = CS.getCapturedStmt();
-  const Stmt *LoopS = S->IgnoreContainers();
-  emitBody(emitBody, S, LoopS);
+    // Emit counter update.
+    EmitIgnoredExpr(LoopExprs.CounterUpdate);
 
-  // Emit "IV = IV + 1" and a back-edge to the condition block.
-  EmitBlock(Continue.getBlock());
-  auto *IncExpr = LoopExprs.Inc;
-  EmitIgnoredExpr(IncExpr);
-  BreakContinueStack.pop_back();
-  EmitBranch(CondBlock);
+    auto emitBody = [&](auto &&emitBody, const Stmt *S,
+                        const Stmt *LoopS) -> void {
+      const Stmt *SimplifiedS = S->IgnoreContainers();
+      if (const auto *CompS = dyn_cast<CompoundStmt>(SimplifiedS)) {
+        // Keep track of the current cleanup stack depth, including debug
+        // scopes.
+        // CodeGenFunction::LexicalScope Scope(CGF, S->getSourceRange());
+        for (const Stmt *CurStmt : CompS->body())
+          emitBody(emitBody, CurStmt, LoopS);
+        return;
+      }
 
-  LoopStack.pop();
-  // Emit the fall-through block.
-  EmitBlock(LoopExit.getBlock());
+      // Emit only the body of the loop statement.
+      if (S == LoopS) {
+        if (const auto *For = dyn_cast<ForStmt>(S)) {
+          S = For->getBody();
+        } else {
+          assert(isa<CXXForRangeStmt>(S) &&
+                 "Expected canonical for loop or range-based for loop.");
+          const auto *CXXFor = cast<CXXForRangeStmt>(S);
+          EmitStmt(CXXFor->getLoopVarStmt());
+          S = CXXFor->getBody();
+        }
+      }
+
+      EmitStmt(S);
+    };
+
+    if (LoopExprs.PerfoSkip)
+      EmitStmt(LoopExprs.PerfoSkip);
+    Stmt *S = const_cast<Stmt *>(CS.getCapturedStmt());
+    Stmt *LoopS = nullptr;
+    OMPParallelForDirective *OMPFD = nullptr;
+    if ((OMPFD = dyn_cast<OMPParallelForDirective>(S)))
+      LoopS = OMPFD->getAssociatedStmt()->IgnoreContainers(true);
+    else
+      LoopS = S->IgnoreContainers();
+    emitBody(emitBody, S, LoopS);
+
+    // Emit "IV = IV + 1" and a back-edge to the condition block.
+    EmitBlock(Continue.getBlock());
+    if (LoopExprs.PerfoInc)
+      EmitIgnoredExpr(LoopExprs.PerfoInc);
+    auto *IncExpr = LoopExprs.Inc;
+    EmitIgnoredExpr(IncExpr);
+    BreakContinueStack.pop_back();
+    EmitBranch(CondBlock);
+
+    LoopStack.pop();
+    // Emit the fall-through block.
+    EmitBlock(LoopExit.getBlock());
+  }
 
   FinishFunction(CD->getBodyRBrace());
 
@@ -575,7 +601,7 @@ void CGApproxRuntime::CGApproxRuntimeEmitPerfoFn(
   CodeGenFunction CGF(CGM, true);
   CodeGenFunction::CGCapturedStmtRAII CapInfoRAII(CGF, &CGSI);
 
-#if DEBUG
+#if 1
   // GG: print loop expressions.
   dbgs() << "============ Loop Exprs =============\n";
   dbgs() << "=== IterationVarRef ===\n";

@@ -59,8 +59,11 @@ struct ApproxLoopHelperExprs {
   //Expr *CounterFinal;
   // Perforation clause step.
   Expr *PerfoStep;
+  Expr *PerfoInc;
+  Stmt *PerfoSkip;
   /// Init statement for all captured expressions.
   Stmt *PreInits;
+  Stmt *OMPParallelForDir;
 };
 
 class ApproxDirective : public Stmt {
