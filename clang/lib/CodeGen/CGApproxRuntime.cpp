@@ -265,9 +265,6 @@ void CGApproxRuntime::CGApproxRuntimeEnterRegion(CodeGenFunction &CGF,
   CodeGenFunction::CGCapturedStmtInfo CGSI(CS);
   CodeGenFunction localCGF(CGM, true);
   CodeGenFunction::CGCapturedStmtRAII CapInfoRAII(localCGF, &CGSI);
-  dbgs() << "=== Codegen CS\n";
-  CS.dump();
-  dbgs() << "=== End of Codegen CS\n";
   llvm::Function *Fn = localCGF.GenerateCapturedStmtFunction(CS);
 
   /// Fill in parameters of runtime function call
@@ -600,42 +597,6 @@ void CGApproxRuntime::CGApproxRuntimeEmitPerfoFn(
   CodeGenFunction::CGCapturedStmtInfo CGSI(CS);
   CodeGenFunction CGF(CGM, true);
   CodeGenFunction::CGCapturedStmtRAII CapInfoRAII(CGF, &CGSI);
-
-#if 1
-  // GG: print loop expressions.
-  dbgs() << "============ Loop Exprs =============\n";
-  dbgs() << "=== IterationVarRef ===\n";
-  LoopExprs.IterationVarRef->dump();
-  dbgs() << "=== LastIteration ===\n";
-  LoopExprs.LastIteration->dump();
-  dbgs() << "=== NumIterations ===\n";
-  LoopExprs.NumIterations->dump();
-  dbgs() << "=== CalcLastIteration ===\n";
-  LoopExprs.CalcLastIteration->dump();
-  dbgs() << "=== PreCond ===\n";
-  LoopExprs.PreCond->dump();
-  dbgs() << "=== PreInits ===\n";
-  LoopExprs.PreInits->dump();
-  dbgs() << "=== Cond ===\n";
-  LoopExprs.Cond->dump();
-  dbgs() << "=== Init ===\n";
-  LoopExprs.Init->dump();
-  dbgs() << "=== Inc ===\n";
-  LoopExprs.Inc->dump();
-  dbgs() << "=== LB ===\n";
-  LoopExprs.LB->dump();
-  dbgs() << "=== UB ===\n";
-  LoopExprs.UB->dump();
-  dbgs() << "=== ST ===\n";
-  LoopExprs.ST->dump();
-  dbgs() << "=== Counter\n";
-  LoopExprs.Counter->dump();
-  dbgs() << "=== CounterInit\n";
-  LoopExprs.CounterInit->dump();
-  dbgs() << "=== CounterUpdate\n";
-  LoopExprs.CounterUpdate->dump();
-  dbgs() << "========= End of Loop Exprs =========\n";
-#endif
 
   llvm::Function *Fn = CGF.GeneratePerfoCapturedStmtFunction(CS, LoopExprs, PC);
   approxRTParams[PerfoFn] =

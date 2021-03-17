@@ -75,7 +75,7 @@ template <typename T>  void copyData(T *dest, T *src, size_t numElements) {
 }
 
 template <typename To, typename From> 
- void cast_and_assign(From *dest, To* src, size_t numElements){
+ void cast_and_assign(To *dest, From* src, size_t numElements){
   for (size_t i = 0; i < numElements; i++){
     dest[i] = (To) src[i];
   }

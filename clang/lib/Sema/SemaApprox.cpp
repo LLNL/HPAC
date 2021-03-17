@@ -1831,19 +1831,13 @@ StmtResult Sema::ActOnApproxDirective(Stmt *AssociatedStmt,
   OMPLoopDirective *OMPLoopDir = nullptr;
   for(const auto &AC : Clauses) {
     if(AC->getClauseKind() == CK_PERFO) {
-      dbgs() << "=== AStmt\n";
-      AssociatedStmt->dump();
       Stmt *LoopStmt = nullptr;
       if ((OMPLoopDir = dyn_cast<OMPLoopDirective>(AssociatedStmt))) {
         LoopStmt = OMPLoopDir->getAssociatedStmt()->IgnoreContainers(true);
-        dbgs() << "Found OMPLoopDirective\n";
       } else {
-        dbgs() << "NOT Found OMPLoopDirective\n";
         LoopStmt = AssociatedStmt;
         B.OMPParallelForDir = nullptr;
       }
-      LoopStmt->dump();
-      dbgs() << "=== End of Astmt\n";
       assert(LoopStmt && "Expected non-null LoopStmt");
       if(checkApproxLoop(LoopStmt, *this, B) == 0) {
         errs() << "Perforated loop is not canonical!\n";
@@ -2092,12 +2086,9 @@ StmtResult Sema::ActOnApproxDirective(Stmt *AssociatedStmt,
 
       for (CapturedStmt::Capture C : OMPCap->captures()) {
         if (C.capturesVariable()) {
-          dbgs() << "=== Add Capture\n";
-          C.getCapturedVar()->dump();
           VarDecl *VD = C.getCapturedVar();
           BuildDeclRefExpr(VD, VD->getType().getNonReferenceType(), VK_LValue,
                            SourceLocation());
-          dbgs() << "=== End of Add Capture\n";
         }
       }
 
@@ -2139,23 +2130,7 @@ StmtResult Sema::ActOnApproxDirective(Stmt *AssociatedStmt,
 
     ActOnOpenMPRegionStart(OMPLoopDir->getDirectiveKind(), getCurScope());
     StmtResult CompStmtRes = BuildOMPParallelFor();
-    dbgs() << "=== CompStmt\n";
-    CompStmtRes.get()->dump();
-    dbgs() << "=== End of CompStmt\n";
     StmtResult OMPCSRes = ActOnOpenMPRegionEnd(CompStmtRes, OMPClauses);
-    dbgs() << "=== OMP CaptureStmt\n";
-    OMPCSRes.get()->dump();
-    dbgs() << "=== End of OMP CaptureStmt\n";
-    CapturedStmt *CapS = cast<CapturedStmt>(OMPCSRes.get());
-    dbgs() << "Num Captures " << CapS->capture_size() << "\n";
-    for (CapturedStmt::Capture C : CapS->captures()) {
-      if (C.capturesVariable()) {
-        dbgs() << "=== OMP Capture\n";
-        C.getCapturedVar()->dump();
-        dbgs() << "=== End of OMP Capture\n";
-      }
-    }
-
     StmtResult OMPParForDirRes = ActOnOpenMPExecutableDirective(
         OMPLoopDir->getDirectiveKind(), DeclarationNameInfo(), OMPD_unknown,
         OMPClauses, OMPCSRes.get(), SourceLocation(), SourceLocation());
@@ -2164,9 +2139,6 @@ StmtResult Sema::ActOnApproxDirective(Stmt *AssociatedStmt,
 
     B.OMPParallelForDir = OMPParForDirRes.get();
 
-    dbgs() << "=== OMPParallelFor\n";
-    B.OMPParallelForDir->dump();
-    dbgs() << "=== End of OMPParallelFor\n";
   }
 
   CS = dyn_cast<CapturedStmt>(ActOnCapturedRegionEnd(AssociatedStmt).get());

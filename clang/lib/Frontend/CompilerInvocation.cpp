@@ -3133,7 +3133,6 @@ static void ParseLangArgs(LangOptions &Opts, ArgList &Args, InputKind IK,
   if ( Opts.Approx ){
       //int version = getLastArgIntValue(Args, OPT_fapprox_version_EQ, 1, Diags);
       int version = getApproxRuntime(Args, Diags);
-      llvm::dbgs() << "Version is :" << version <<"\n";
       Opts.Approx = version;
   }
 

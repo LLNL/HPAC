@@ -350,7 +350,6 @@ void Parser::initializePragmaHandlers() {
   PP.AddPragmaHandler(OpenMPHandler.get());
 
   ///Adding pragma handler for approximate pragmas
-  llvm::dbgs() << "Approx Is enalbed : " << getLangOpts().Approx << "\n";
   if ( getLangOpts().Approx ){
     ApproxHandler = std::make_unique<PragmaApproxHandler>();
   }

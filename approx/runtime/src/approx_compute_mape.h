@@ -29,16 +29,19 @@ class MAPE{
             }
         }
         ~MAPE(){
+        }
+
+        double getStatistics(){
             for (int i = 1; i < ENDVERSIONS; i++){
                 if (invocations[i] != invocations[i-1]){
                     std::cout << "This should never happen" << invocations[i-1] << " " << invocations[i]<<std::endl;
                 }
                 if (invocations[i] == 0){
-                    return;
+                    return -1;
                 }
             }
             double MAPE = fabs(average[ACCURATE] - average[APPROXIMATE])/fabs(average[ACCURATE]);
-            std::cout << "REGION_ERROR:"<<  MAPE << std::endl;
+            return MAPE;
         }
 
         void registerAccurateOut(approx_var_info_t *vars, int num_vars){
