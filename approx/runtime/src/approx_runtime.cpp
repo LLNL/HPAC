@@ -5,14 +5,22 @@
 #include <chrono>
 #include <unordered_map>
 #include <random>
-#include <approx.h>
-#include <approx_data_util.h>
-#include <approx_internal.h>
+#include <omp.h>
+
+#include "approx.h"
+#include "approx_data_util.h"
+#include "approx_internal.h"
+
 
 using namespace std;
 
 #define MEMO_IN 1
 #define MEMO_OUT 2
+
+#define RAND_SIZE  10000
+
+float __approx_perfo_rate__;
+int __approx_perfo_step__;
 
 enum ExecuteMode: uint8_t{
   EXECUTE
@@ -20,10 +28,8 @@ enum ExecuteMode: uint8_t{
 
 class ApproxRuntimeConfiguration{
   ExecuteMode Mode;
-  bool ExecuteBoth;
 public:
-  int approxStep;
-  float approxRate;
+  bool ExecuteBoth;
   int tableSize;
   float threshold;
   int historySize;
@@ -32,10 +38,6 @@ public:
   float perfoRate;
   float *randomNumbers;
   int count;
-
-  ~ApproxRuntimeConfiguration(){
-    delete []randomNumbers;
-  }
 
   ApproxRuntimeConfiguration() {
       ExecuteBoth = false;
@@ -78,25 +80,27 @@ public:
     if (env_p) {
       threshold = atof(env_p);
     }
-  }
 
     env_p = std::getenv("PERFO_STEP");
     if (env_p) {
       perfoStep = atoi(env_p);
+      __approx_perfo_step__ = perfoStep;
     }
 
     env_p = std::getenv("PERFO_RATE");
     if (env_p) {
       perfoRate = atof(env_p);
+      __approx_perfo_rate__ = perfoRate;
     }
 
  // This is not the optimal way. Since, we will 
  // always use the same random numbers.
-    randomNumbers = new float[RAND_SIZE];
+    int numThreads = 32; //omp_get_max_threads();
+    randomNumbers = new float[RAND_SIZE*numThreads];
     static std::default_random_engine generator;
     static std::uniform_real_distribution<float> distribution(0.0f, 1.0f);
 
-    for (int i = 0 ; i < RAND_SIZE; i++){
+    for (int i = 0 ; i < RAND_SIZE*numThreads; i++){
      randomNumbers[i] = distribution(generator);
     }
   }
@@ -108,15 +112,32 @@ public:
    ExecuteMode getMode(){return Mode;}
 
   bool getExecuteBoth(){ return ExecuteBoth; }
+
 };
 
 ApproxRuntimeConfiguration RTEnv;
 
+
+int getPredictionSize() { return RTEnv.predictionSize;}
+int getHistorySize() { return RTEnv.historySize; }
+int getTableSize() { return RTEnv.tableSize; }
+float getThreshold(){ return RTEnv.threshold;}
+
+
 bool __approx_skip_iteration(unsigned int i, float pr) {
-  static thread_local int index = 0;
-    if (RTEnv.randomNumbers[(index++)%RAND_SIZE] <= pr) {
+    static thread_local int index = 0;
+    static thread_local int threadId = -1;
+    if ( threadId == -1 ){
+        threadId = 0;
+        if (omp_in_parallel()){
+            threadId = omp_get_thread_num();
+        }
+    }
+         
+    if (RTEnv.randomNumbers[threadId*RAND_SIZE + index++] <= pr) {
         return true;
     }
+    index = (index+1)%RAND_SIZE;
     return false;
 }
 
@@ -128,20 +149,16 @@ void __approx_exec_call(void (*accurateFN)(void *), void (*perfoFN)(void *),
   approx_var_info_t *input_vars = (approx_var_info_t *)inputs;
   approx_var_info_t *output_vars = (approx_var_info_t *)outputs;
 
-    if (cond) {
-      if ( perfoFN ){
-          perforate(accurateFN, perfoFN, arg, input_vars, num_inputs, output_vars, num_outputs, RTEnv.getExecuteBoth());
-      } else if (memo_type == MEMO_IN) {
-        memoize_in(accurateFN, arg, input_vars, num_inputs, output_vars,
-                   num_outputs, RTEnv.getExecuteBoth(), RTEnv.tableSize, RTEnv.threshold );
-      } else if (memo_type == MEMO_OUT) {
-        memoize_out(accurateFN, arg, output_vars, num_outputs, RTEnv.getExecuteBoth(), RTEnv.predictionSize, RTEnv.historySize, RTEnv.threshold);
-      } else {
-        accurateFN(arg);
-      }
-    } else {
-      accurateFN(arg);
-    }
+  if ( perfoFN ){
+      perforate(accurateFN, perfoFN, arg, input_vars, num_inputs, output_vars, num_outputs, RTEnv.getExecuteBoth());
+  } else if (memo_type == MEMO_IN) {
+    memoize_in(accurateFN, arg, input_vars, num_inputs, output_vars,
+               num_outputs, RTEnv.getExecuteBoth(), RTEnv.tableSize, RTEnv.threshold );
+  } else if (memo_type == MEMO_OUT) {
+    memoize_out(accurateFN, arg, output_vars, num_outputs);
+  } else {
+    accurateFN(arg);
+  }
 }
 
 const float approx_rt_get_percentage(){

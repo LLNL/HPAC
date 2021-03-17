@@ -13,7 +13,7 @@ class ThreadMemoryPool{
   int totalThreads;
 public:
   ThreadMemoryPool(){
-     totalThreads = omp_get_num_procs(); 
+     totalThreads = 32; 
      lastMemoIn = new int[totalThreads]();
      memoryRegions = new T**[totalThreads];
      for ( int i = 0; i < totalThreads; i++){
@@ -22,27 +22,35 @@ public:
   };
 
   ~ThreadMemoryPool() {
+    double statistics = 0;
+   long int cnt = 0;
     for (int i = 0; i < totalThreads; i++) {
       for (int j = 0; j < lastMemoIn[i]; j++) {
+        statistics += memoryRegions[i][j] -> getStatistics();
+        cnt+=1;
         delete memoryRegions[i][j];
       }
       delete [] memoryRegions[i];
     }
     delete [] memoryRegions;
     delete [] lastMemoIn;
+    if (cnt != 0)
+        cout<<"APPROX:" << statistics/(double)cnt << endl;
   }
 
   T *findMemo(int threadId, unsigned long Addr) {
     static thread_local int myIndex = -1;
-    static thread_local T**thread_region = memoryRegions[threadId];
+    static thread_local T** thread_region = memoryRegions[threadId];
 
-    if (myIndex != -1 && thread_region[myIndex] && (((unsigned long) (thread_region[myIndex]->accurate)) == Addr)){
+    if (myIndex != -1 && (((unsigned long) (thread_region[myIndex]->accurate)) == Addr)){
       return thread_region[myIndex];
     }
 
     for (int i = 0; i < lastMemoIn[threadId]; i++) {
-      if ((unsigned long)(thread_region[i]->accurate) == Addr)
-        return memoryRegions[threadId][i];
+      if ((unsigned long)(thread_region[i]->accurate) == Addr){
+            myIndex = i;
+            return thread_region[i];
+      }
     }
     return nullptr;
   }

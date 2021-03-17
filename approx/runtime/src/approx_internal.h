@@ -60,7 +60,7 @@ enum ApproxType : int8_t {
 };
 
 void memoize_out(void (*accurate)(void *), void *arg,
-                 approx_var_info_t *outputs, int num_outputs, bool execBoth, int pSize, int hSize, real_t threshold);
+                 approx_var_info_t *outputs, int num_outputs);
 
 void memoize_in(void (*accurate)(void *), void *arg, approx_var_info_t *inputs,
                 int num_inputs, approx_var_info_t *outputs, int num_outputs, bool execBoth, 
@@ -70,6 +70,12 @@ void perforate(void (*accurate)(void *), void (*perfo)(void *),
                  void *args, approx_var_info_t *input_vars, 
                  int num_inputs, approx_var_info_t *output_vars,
                  int num_outputs, bool ExecuteBoth);
+
+int getPredictionSize();
+int getHistorySize();
+int getTableSize();
+float getThreshold();
+
 #ifdef __cplusplus
 }
 #endif

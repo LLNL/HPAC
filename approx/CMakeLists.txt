@@ -1,4 +1,5 @@
-cmake_minimum_required(VERSION 2.8 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.14 FATAL_ERROR)
+set( CMAKE_VERBOSE_MAKEFILE on )
 
 # CMAKE_BUILD_TYPE was not set, default to Release.
 if (NOT CMAKE_BUILD_TYPE)
@@ -6,12 +7,15 @@ if (NOT CMAKE_BUILD_TYPE)
 endif()
 
 set(CMAKE_BUILD_TYPE Release)
+set(CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake/;${CMAKE_MODULE_PATH}")
+
 find_package(OpenMP REQUIRED)
 
 if (OPENMP_FOUND)
     set (CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${OpenMP_C_FLAGS}")
     set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${OpenMP_CXX_FLAGS}")
     set (CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} ${OpenMP_EXE_LINKER_FLAGS}")
+    message("LINKER FLAGS ARE ${OpenMP_EXE_LINKER_FLAGS}")
 endif()
 
 set(CMAKE_CXX_STANDARD 14 CACHE STRING "C++ standard to conform to")
@@ -37,12 +41,8 @@ if("${isSystemDir}" STREQUAL "-1")
     set(CMAKE_INSTALL_RPATH "${CMAKE_INSTALL_PREFIX}/lib")
 endif("${isSystemDir}" STREQUAL "-1")
 
-<<<<<<< HEAD
-SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -march=native -g")
-=======
 SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -march=native")
 SET(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -march=native")
->>>>>>> f3f4373ed66 (Added omp aware runtime)
 
 set(APPROX_INSTALL_LIBDIR "lib${LLVM_LIBDIR_SUFFIX}")
 set(APPROX_LIBDIR_SUFFIX "" CACHE STRING
