@@ -504,6 +504,7 @@ void Parser::Initialize() {
     ParseApproxClause[CK_IN] = &Parser::ParseApproxInClause;
     ParseApproxClause[CK_OUT] = &Parser::ParseApproxOutClause;
     ParseApproxClause[CK_INOUT] = &Parser::ParseApproxInOutClause;
+    ParseApproxClause[CK_LABEL] = &Parser::ParseApproxLabelClause;
   }
 
   Ident_instancetype = nullptr;

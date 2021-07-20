@@ -3480,6 +3480,8 @@ private:
   ParseApproxClauseFn ParseApproxInClause;
   ParseApproxClauseFn ParseApproxOutClause;
   ParseApproxClauseFn ParseApproxInOutClause;
+  ParseApproxClauseFn ParseApproxLabelClause;
+  
 
   bool ParseApproxVarList(SmallVectorImpl<Expr*> &Vars, SourceLocation &ELoc);
 

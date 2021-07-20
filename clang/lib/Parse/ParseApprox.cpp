@@ -211,6 +211,26 @@ ApproxClause *Parser::ParseApproxInOutClause(ClauseKind CK) {
   return Actions.ActOnApproxVarList(CK, Vars, Locs);
 }
 
+ApproxClause *Parser::ParseApproxLabelClause(ClauseKind CK) {
+  SourceLocation Loc = Tok.getLocation();
+  SourceLocation LParenLoc = ConsumeAnyToken();
+  BalancedDelimiterTracker T(*this, tok::l_paren, tok::annot_pragma_approx_end);
+  if (T.expectAndConsume(diag::err_expected_lparen_after, ApproxClause::Name[CK].c_str()))
+    return nullptr;
+
+  SourceLocation ExprLoc = Tok.getLocation();
+  ExprResult Val(ParseExpression());
+  Val = Actions.ActOnFinishFullExpr(Val.get(), ExprLoc, false);
+
+  SourceLocation ELoc = Tok.getLocation();
+  if (!T.consumeClose())
+    ELoc = T.getCloseLocation();
+
+  ApproxVarListLocTy Locs(Loc, LParenLoc, ELoc);
+
+  return Actions.ActOnApproxLabelClause(CK, Locs, Val.get());
+}
+
 bool isApproxClause(Token &Tok, ClauseKind &Kind) {
   for (unsigned i = CK_START; i < CK_END; i++) {
     enum ClauseKind CK = (enum ClauseKind)i;

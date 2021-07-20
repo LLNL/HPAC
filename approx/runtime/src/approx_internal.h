@@ -66,4 +66,7 @@ void memoize_in(void (*accurate)(void *), void *arg, approx_var_info_t *inputs,
 
 bool rel_error_larger(void *ground, void *test, size_t numElements,
                        ApproxType Type, real_t threshold);
+
+void cast_and_assign(void *src, size_t numElements, ApproxType Type, double *dest);
+
 #endif

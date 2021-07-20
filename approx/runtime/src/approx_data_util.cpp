@@ -65,6 +65,12 @@ template <class T> static void copyData(T *dest, T *src, size_t numElements) {
   return;
 }
 
+template <class T> static void cast_and_assign(T* src, double *dest,size_t numElements){
+  for (size_t i = 0; i < numElements; i++){
+    dest[i] = (double) src[i];
+  }
+}
+
 /**
  * add vectors and store output to another vector.
  *
@@ -318,4 +324,31 @@ bool rel_error_larger(void *ground, void *test, size_t numElements,
     }
   }
   return 0.0;
+}
+
+void cast_and_assign(void *src, size_t numElements,
+                      ApproxType Type, double *dest) {
+  if (numElements == 1) {
+    switch (Type) {
+#define APPROX_TYPE(Enum, CType, nameOfType)                                   \
+  case Enum:                                                                   \
+    *dest = (double)(*(CType *)src);                                           \
+    return;
+#include "clang/Basic/approxTypes.def"
+    case INVALID:
+      std::cout << "INVALID DATA TYPE passed in argument list\n";
+      break;
+    }
+  } else {
+    switch (Type) {
+#define APPROX_TYPE(Enum, CType, nameOfType)                                   \
+  case Enum:                                                                   \
+    return cast_and_assign((CType *)src, dest, numElements);
+#include "clang/Basic/approxTypes.def"
+    case INVALID:
+      std::cout << "INVALID DATA TYPE passed in argument list\n";
+      break;
+    }
+  }
+  return;
 }

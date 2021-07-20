@@ -22,7 +22,7 @@ using namespace approx;
 using namespace llvm;
 
 const std::string ApproxClause::Name[approx::CK_END] = {
-    "perfo", "memo", "dt", "nn", "user", "if", "in", "out", "inout"};
+    "perfo", "memo", "dt", "nn", "user", "if", "in", "out", "inout", "label"};
 
 const std::string ApproxPerfoClause::PerfoName[approx::PT_END] = {
     "small", "large", "rand", "init", "final"};
