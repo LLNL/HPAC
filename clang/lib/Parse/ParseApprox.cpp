@@ -243,6 +243,7 @@ bool isApproxClause(Token &Tok, ClauseKind &Kind) {
 }
 
 StmtResult Parser::ParseApproxDirective(ParsedStmtContext StmtCtx) {
+  dbgs()<< "Entering Approximate region with " << getLangOpts().Approx << "\n";
   assert(Tok.is(tok::annot_pragma_approx_start));
   /// This should be a function call;
   inApproxScope = true;

@@ -5184,6 +5184,7 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
   // Forward flags of Approx.
   if (Args.hasFlag(options::OPT_fapprox, options::OPT_fno_approx, false)){
     CmdArgs.push_back("-fapprox");
+    Args.AddAllArgs(CmdArgs, options::OPT_fapprox_version_EQ);
   }
 
   // Forward flags for OpenMP. We don't do this if the current action is an

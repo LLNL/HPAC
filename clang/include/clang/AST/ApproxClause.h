@@ -555,6 +555,7 @@ class ApproxClauseVisitorBase{
   RetTy VisitApproxInClause(PTR(ApproxInClause) S) {DISPATCH(ApproxInClause);}
   RetTy VisitApproxOutClause(PTR(ApproxOutClause) S) {DISPATCH(ApproxOutClause);}
   RetTy VisitApproxInOutClause(PTR(ApproxInOutClause) S) {DISPATCH(ApproxInOutClause);}
+  RetTy VisitApproxLabelClause(PTR(ApproxLabelClause) S) {DISPATCH(ApproxLabelClause);}
 
   RetTy Visit(PTR(ApproxClause) S){
     switch (S->getClauseKind()){
@@ -576,6 +577,8 @@ class ApproxClauseVisitorBase{
         return VisitApproxOutClause(static_cast<PTR(ApproxOutClause)>(S));
       case approx::CK_INOUT:
         return VisitApproxInOutClause(static_cast<PTR(ApproxInOutClause)>(S));
+      case approx::CK_LABEL:
+        return VisitApproxLabelClause(static_cast<PTR(ApproxLabelClause)>(S));
     }
   }
 
@@ -615,6 +618,7 @@ class ApproxClausePrinter final : public ApproxClauseVisitor<ApproxClausePrinter
     void VisitApproxInClause(ApproxInClause *S);
     void VisitApproxOutClause(ApproxOutClause *S);
     void VisitApproxInOutClause(ApproxInOutClause *S);
+    void VisitApproxLabelClause(ApproxLabelClause *S);
 };
 
 } // namespace clang

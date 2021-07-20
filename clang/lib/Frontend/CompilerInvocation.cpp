@@ -8,6 +8,7 @@
 
 #include "clang/Frontend/CompilerInvocation.h"
 #include "TestModuleFileExtension.h"
+#include "clang/Basic/Approx.h"
 #include "clang/Basic/Builtins.h"
 #include "clang/Basic/CharInfo.h"
 #include "clang/Basic/CodeGenOptions.h"
@@ -124,6 +125,31 @@ CompilerInvocationBase::~CompilerInvocationBase() = default;
 #define SIMPLE_ENUM_VALUE_TABLE
 #include "clang/Driver/Options.inc"
 #undef SIMPLE_ENUM_VALUE_TABLE
+
+
+int getApproxRuntime(const ArgList &Args, DiagnosticsEngine &Diag) {
+  StringRef RuntimeName("deploy");
+  const Arg *A = Args.getLastArg(options::OPT_fapprox_version_EQ);
+  if (A)
+    RuntimeName = A->getValue();
+
+  auto RT = llvm::StringSwitch<approx::ApproxRuntimeKind>(RuntimeName)
+                .Case("deploy", approx::APPROX_DEPLOY)
+                .Case("profile-time", approx::APPROX_PROFILE_TIME)
+                .Case("profile-data", approx::APPROX_PROFILE_DATA)
+                .Default(approx::APPROX_Unknown);
+
+  if (RT == approx::APPROX_Unknown) {
+    if (A){
+      Diag.Report(diag::err_drv_unsupported_option_argument)
+          << A->getOption().getName() << A->getValue();
+    }
+    else
+      Diag.Report(diag::err_drv_unsupported_opt) << "-fapprox_version";
+  }
+  return RT;
+}
+
 
 static llvm::Optional<unsigned> normalizeSimpleEnum(OptSpecifier Opt,
                                                     unsigned TableIndex,
@@ -3104,6 +3130,12 @@ static void ParseLangArgs(LangOptions &Opts, ArgList &Args, InputKind IK,
 
   // Check if -fapprox is specified. If it has set to enabled.
   Opts.Approx = Args.hasArg(options::OPT_fapprox) ? 1: 0;
+  if ( Opts.Approx ){
+      //int version = getLastArgIntValue(Args, OPT_fapprox_version_EQ, 1, Diags);
+      int version = getApproxRuntime(Args, Diags);
+      llvm::dbgs() << "Version is :" << version <<"\n";
+      Opts.Approx = version;
+  }
 
   // Check if -fopenmp is specified and set default version to 5.0.
   Opts.OpenMP = Args.hasArg(options::OPT_fopenmp) ? 50 : 0;

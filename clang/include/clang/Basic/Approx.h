@@ -20,6 +20,17 @@
 namespace clang {
 namespace approx {
 
+enum ApproxRuntimeKind {
+  /// The runtime that deploys approximations as instructed by the source code file
+  APPROX_DEPLOY = 1,
+  /// The runtime that profiles approximate regions. No approximation takes place
+  APPROX_PROFILE_TIME,
+  ///The runtime that profiles the data values pipelined through the annotated regions.
+  APPROX_PROFILE_DATA,
+  /// An unknown option.
+  APPROX_Unknown
+};
+
 enum ClauseKind : uint {
   CK_PERFO = 0,
   CK_MEMO,
