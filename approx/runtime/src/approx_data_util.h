@@ -1,17 +1,236 @@
 #ifndef __APPROX_DATA_UTIL__
 #define __APPROX_DATA_UTIL__
 
+#include <cmath>
 #include <iostream>
 #include <stdint.h>
+#include <cstring>
 
-#include <approx_internal.h>
+#include "approx_internal.h"
 
-void add(void *sum, void *augend, void *addend, ApproxType Type, size_t numElements);
-void sub(void *difference, void *minuend, void *subtrahend, ApproxType Type, size_t numElements);
-void multiply(void *product, void *multiplier, void *multiplicand, ApproxType Type, size_t numElements);
-void divide(void *quotient, void *dividend, void *divisor, ApproxType Type, size_t numElements);
-double average(void *dataPtr, size_t numElements, ApproxType Type);
+template<typename T>
+float aggregate(T *ptr, size_t numElements){
+  float total = 0.0f;
+  for (size_t i = 0; i < numElements; i++){
+    total += (float) ptr[i];
+  }
+  return total;
+}
+
+template <typename T>
+ void add(T *sum, T *augend, T *addend, size_t numElements) {
+  for (size_t i = 0; i < numElements; i++) {
+    sum[i] = augend[i] + addend[i];
+  }
+  return;
+}
+
+template <typename T>
+ void sub(T *difference, T *minuend, T *subtrahend, size_t numElements) {
+  for (size_t i = 0; i < numElements; i++) {
+    difference[i] = minuend[i] - subtrahend[i];
+  }
+}
+
+template <typename T>
+ void multiply(T *product, T *multiplier, T *multiplicand,
+                     size_t numElements) {
+  for (size_t i = 0; i < numElements; i++) {
+    product[i] = multiplier[i] * multiplicand[i];
+  }
+}
+
+template <typename T>
+ void divide(T *quotient, T *dividend, T *divisor, size_t numElements) {
+  for (size_t i = 0; i < numElements; i++) {
+    quotient[i] = dividend[i] / divisor[i];
+  }
+  return;
+}
+
+template <typename T>
+ bool rel_error_larger(T *ground, T *test, size_t numElements,
+                             real_t threshold) {
+  for (size_t i = 0; i < numElements; i++) {
+    real_t temp = (real_t) fabs((ground[i] - test[i]) / (real_t)ground[i]);
+    if (temp > threshold) {
+      return true;
+    }
+  }
+  return false;
+}
+
+template <typename T> double average(T *data, size_t numElements) {
+  double sum = 0.0;
+  for (size_t i = 0; i < numElements; i++) {
+    sum += (double)data[i];
+  }
+  sum /= (double)numElements;
+  return sum;
+}
+
+template <typename T>  void copyData(T *dest, T *src, size_t numElements) {
+    std::memcpy(dest, src, numElements*sizeof(T));
+    return;
+}
+
+template <typename To, typename From> 
+ void cast_and_assign(From *dest, To* src, size_t numElements){
+  for (size_t i = 0; i < numElements; i++){
+    dest[i] = (To) src[i];
+  }
+}
+
+template <typename T>
+void cast_and_assign(void *src, size_t numElements,
+                      ApproxType Type, T *dest) {
+  if (numElements == 1) {
+    switch (Type) {
+#define APPROX_TYPE(Enum, CType, nameOfType)                                   \
+  case Enum:                                                                   \
+    *dest = (T)(*(CType *)src);                                           \
+    return;
+#include "clang/Basic/approxTypes.def"
+    case INVALID:
+      std::cout << "INVALID DATA TYPE passed in argument list\n";
+      break;
+    }
+  } else {
+    switch (Type) {
+#define APPROX_TYPE(Enum, CType, nameOfType)                                   \
+  case Enum:                                                                   \
+    return cast_and_assign(dest, (CType *)src, numElements);
+#include "clang/Basic/approxTypes.def"
+    case INVALID:
+      std::cout << "INVALID DATA TYPE passed in argument list\n";
+      break;
+    }
+  }
+  return;
+}
+
+
+template<typename T>
+void convertTo(T *dest, void *src, size_t numElements,
+                      ApproxType Type) {
+  if (numElements == 1) {
+    switch (Type) {
+#define APPROX_TYPE(Enum, CType, nameOfType)                                   \
+  case Enum:                                                                   \
+    *dest = (T)(*(CType *)src);                                           \
+    return;
+#include "clang/Basic/approxTypes.def"
+    case INVALID:
+      std::cout << "INVALID DATA TYPE passed in argument list\n";
+      break;
+    }
+  } else {
+    switch (Type) {
+#define APPROX_TYPE(Enum, CType, nameOfType)                                   \
+  case Enum:                                                                   \
+    return cast_and_assign(dest, (CType *)src, numElements);
+#include "clang/Basic/approxTypes.def"
+    case INVALID:
+      std::cout << "INVALID DATA TYPE passed in argument list\n";
+      break;
+    }
+  }
+  return;
+}
+
+template<typename T>
+void convertFrom(void *dest, T *src, size_t numElements, ApproxType Type){
+    switch (Type) {
+#define APPROX_TYPE(Enum, CType, nameOfType)                                   \
+  case Enum:                                                                   \
+    return cast_and_assign((CType *)dest, src, numElements);
+#include "clang/Basic/approxTypes.def"
+    case INVALID:
+      std::cout << "INVALID DATA TYPE passed in argument list\n";
+      break;
+    }
+  return;
+}
+
+
+template <typename T>
+T** create2DArray(unsigned int nrows, unsigned int ncols, const T& val = T() ){
+    if ( nrows == 0 ){
+        printf("Invalid argument rows are 0\n");
+        exit(-1);
+    }
+
+    if ( ncols == 0 ){
+        printf("Invalid cols are 0\n");
+    }
+    T **ptr = new T*[nrows];;
+    T *pool = new T[nrows*ncols]{val};
+    for (unsigned int i = 0; i < nrows; ++i, pool+= ncols){
+        ptr[i] = pool;
+    }
+    return ptr;
+}
+
+template<typename T>
+void delete2DArray(T** arr){
+    delete [] arr[0];
+    delete [] arr;
+}
+
+template<typename T>
+T** createTemp2DVarStorage(approx_var_info_t *vars, int numVars, 
+            int rows, int *cols){
+    int columns = 0;
+    for (int i = 0; i < numVars; i++){
+       columns+=vars[i].num_elem; 
+    }
+    *cols = columns;
+    T** ptr = create2DArray<T>(rows, columns); 
+    return ptr;
+}
+
+template<typename T>
+T* createTemp1DVarStorage(approx_var_info_t *vars, int numVars, 
+             int *numElements){
+    int elements = 0;
+    for (int i = 0; i < numVars; i++){
+       elements+=vars[i].num_elem; 
+    }
+    *numElements = elements;
+    T* ptr = new T[elements];
+    return ptr;
+}
+
+template<typename T>
+void packVarToVec(approx_var_info_t *values, int num_values, T *vector){
+  for (int i = 0; i < num_values; i++){
+    convertTo(vector, values[i].ptr, values[i].num_elem, (ApproxType)values[i].data_type);
+    vector += values[i].num_elem;
+  }
+}
+
+template<typename T>
+void unPackVecToVar(approx_var_info_t *values, int num_values, T *vector){
+  for (int i = 0; i < num_values; i++){
+    convertFrom(values[i].ptr, vector, values[i].num_elem, (ApproxType)values[i].data_type);
+    vector += values[i].num_elem;
+  }
+}
+
+void add(void *sum, void *augend, void *addend, ApproxType Type,
+         size_t numElements);
+void sub(void *difference, void *minuend, void *subtrahend, ApproxType Type,
+         size_t numElements);
+void multiply(void *product, void *multiplier, void *multiplicand,
+              ApproxType Type, size_t numElements);
+void divide(void *quotient, void *dividend, void *divisor, ApproxType Type,
+            size_t numElements);
+
 const char *getTypeName(ApproxType Type);
-void copyData(void *dest, void *src, size_t numElements, ApproxType Type);
+bool rel_error_larger(void *ground, void *test, size_t numElements,
+                      ApproxType Type, real_t threshold);
 
+double average(void *dataPtr, size_t numElements, ApproxType Type);
+void copyData(void *dest, void *src, size_t numElements, ApproxType Type);
+float aggregate( void *data, size_t numElements, ApproxType Type);
 #endif

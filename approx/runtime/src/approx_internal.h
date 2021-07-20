@@ -1,11 +1,12 @@
 #ifndef __APPROX_INTERNAL__
 #define __APPROX_INTERNAL__
-
+#ifdef __cplusplus
+extern "C" {
+#endif
 #include <stddef.h>
 #include <stdint.h>
-#include <string>
 
-typedef double real_t;
+typedef float real_t;
 
 /** @struct approx_perfo_info_t
  *  @brief This structure contains all the information the
@@ -59,14 +60,17 @@ enum ApproxType : int8_t {
 };
 
 void memoize_out(void (*accurate)(void *), void *arg,
-                 approx_var_info_t *outputs, int num_outputs);
+                 approx_var_info_t *outputs, int num_outputs, bool execBoth, int pSize, int hSize, real_t threshold);
 
 void memoize_in(void (*accurate)(void *), void *arg, approx_var_info_t *inputs,
-                int num_inputs, approx_var_info_t *outputs, int num_outputs);
+                int num_inputs, approx_var_info_t *outputs, int num_outputs, bool execBoth, 
+                int tSize, real_t threshold);
 
-bool rel_error_larger(void *ground, void *test, size_t numElements,
-                       ApproxType Type, real_t threshold);
-
-void cast_and_assign(void *src, size_t numElements, ApproxType Type, double *dest);
-
+void perforate(void (*accurate)(void *), void (*perfo)(void *),
+                 void *args, approx_var_info_t *input_vars, 
+                 int num_inputs, approx_var_info_t *output_vars,
+                 int num_outputs, bool ExecuteBoth);
+#ifdef __cplusplus
+}
+#endif
 #endif

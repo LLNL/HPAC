@@ -293,9 +293,9 @@ StmtResult Parser::ParseApproxDirective(ParsedStmtContext StmtCtx) {
   ConsumeAnnotationToken();
   ApproxVarListLocTy Locs(DirectiveStart, ClauseStartLocation, DirectiveEnd);
 
+  // Start captured region sema, will end withing ActOnApproxDirective.
   Actions.ActOnCapturedRegionStart(Tok.getEndLoc(), getCurScope(), CR_Default, /* NumParams = */1);
   StmtResult AssociatedStmt = (Sema::CompoundScopeRAII(Actions), ParseStatement());
-  AssociatedStmt = Actions.ActOnCapturedRegionEnd(AssociatedStmt.get());
   Directive = Actions.ActOnApproxDirective(AssociatedStmt.get(), Clauses, Locs);
   inApproxScope = false;
   return Directive;

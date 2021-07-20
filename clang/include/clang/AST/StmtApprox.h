@@ -57,9 +57,8 @@ struct ApproxLoopHelperExprs {
   Expr *CounterUpdate;
   /// Final loop counter value for CodeGen.
   //Expr *CounterFinal;
-  // Random perforation condition for CodeGen.
-  // TODO: Remove, if codegen builds call to __approx_skip_iteration instead of sema.
-  Expr *PerfoRandCond;
+  // Perforation clause step.
+  Expr *PerfoStep;
   /// Init statement for all captured expressions.
   Stmt *PreInits;
 };
