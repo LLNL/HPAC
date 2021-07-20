@@ -487,11 +487,6 @@ llvm::Function *CodeGenFunction::GeneratePerfoCapturedStmtFunction(
   // Emit perfo rand cond basic block.
   if(PC.getPerfoType() == approx::PT_RAND) {
     // Skip iteration if true.
-  #if 0
-    EmitBranchOnBoolExpr(LoopExprs.PerfoRandCond, Continue.getBlock(), LoopBody, getProfileCount(&CS));
-
-    // Alternative codegen
-  #else
     StringRef FnName("__approx_skip_iteration");
     llvm::Function *Fn = CGM.getModule().getFunction(FnName);
     llvm::FunctionType *FnTy = llvm::FunctionType::get(
@@ -504,23 +499,19 @@ llvm::Function *CodeGenFunction::GeneratePerfoCapturedStmtFunction(
 
     llvm::Value *IV = EmitLoadOfScalar(EmitLValue(LoopExprs.IterationVarRef), SourceLocation());
     llvm::Value *Pr = nullptr;
-    // Emit rand step declaration, if there is one.
-    if (const auto *RandStepExpr = dyn_cast<DeclRefExpr>(PC.getStep())) {
-      if (const auto *RandStepDecl =
-              dyn_cast<VarDecl>(RandStepExpr->getDecl())) {
-        if (!CS.capturesVariable(RandStepDecl))
-          EmitVarDecl(*RandStepDecl);
-        Pr = EmitLoadOfScalar(EmitLValue(RandStepExpr), SourceLocation());
-      }
+
+    // Emit Pr expression, either loading from a captured DRE or evaluating it.
+    if (dyn_cast<DeclRefExpr>(LoopExprs.PerfoStep)) {
+      Pr = EmitLoadOfScalar(EmitLValue(LoopExprs.PerfoStep),
+                            SourceLocation());
     } else
-      Pr = EmitScalarExpr(PC.getStep());
+      Pr = EmitScalarExpr(LoopExprs.PerfoStep);
 
     assert(Pr != nullptr && "Expected a non-null Pr value");
 
     llvm::FunctionCallee FnCallee({FnTy, Fn});
     llvm::Value *Ret = EmitRuntimeCall(FnCallee, { IV, Pr });
     Builder.CreateCondBr(Ret, Continue.getBlock(), LoopBody);
-#endif
   } else {
     EmitBranch(LoopBody);
   }

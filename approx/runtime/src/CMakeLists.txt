@@ -1,17 +1,22 @@
 configure_file(${LIBAPPROX_INC_DIR}/approx.h approx.h COPYONLY)
+message("libapprox is ${LIBAPPROX_INC_DIR}") 
 
 set(CLANG_SOURCE_INCLUDE "${LLVM_EXTERNAL_CLANG_SOURCE_DIR}/include/")
+message("libapprox is ${CLANG_SOURCE_INCLUDE}") 
+message("approx include is ${LIBAPPROX_INC_DIR}")
 
 set(LIBAPPROX_SOURCE_FILES
     approx_runtime.cpp
     approx_data_util.cpp
     approx_memoize_out.cpp
     approx_memoize_iact_in.cpp
+    approx_perforate.cpp
 )
 
 include_directories(
     ${CMAKE_CURRENT_BINARY_DIR}
     ${LIBAPPROX_INC_DIR}
+    ${LIBAPPROX_BASE_DIR}
     ${CLANG_SOURCE_INCLUDE}
 )
 
@@ -27,6 +32,7 @@ set_target_properties(approx PROPERTIES
 
 target_link_libraries(approx PRIVATE ${CMAKE_DL_LIBS})
 
+message("PACKAGE VERSION is: ${PACKAGE_VERSION}")
 string(REGEX MATCH "[0-9]+\\.[0-9]+(\\.[0-9]+)?" CLANG_VERSION ${PACKAGE_VERSION})
 set(LIBAPPROX_HEADERS_INSTALL_PATH "${APPROX_INSTALL_LIBDIR}/clang/${CLANG_VERSION}/include")
 

@@ -1833,12 +1833,21 @@ StmtResult Sema::ActOnApproxDirective(Stmt *AssociatedStmt,
 
       ApproxPerfoClause *PC = cast<ApproxPerfoClause>(AC);
 
+      // Capture PerfoStep if a DRE or use directly the expression.
+      if (DeclRefExpr *DRE = dyn_cast<DeclRefExpr>(PC->getStep())) {
+        ExprResult CapturedDRE =
+            this->BuildDeclRefExpr(DRE->getDecl(), DRE->getDecl()->getType(),
+                                   VK_LValue, SourceLocation());
+        B.PerfoStep = CapturedDRE.get();
+      } else
+        B.PerfoStep = PC->getStep();
+
       // Buid the perforation condition expression.
       switch(PC->getPerfoType()) {
         case PT_SMALL: {
           // Create the perforation conditional add expression.
           ExprResult ModOp = this->BuildBinOp(this->getCurScope(), SourceLocation(), BO_Rem,
-                                 B.IterationVarRef, PC->getStep());
+                                 B.IterationVarRef, B.PerfoStep);
           ExprResult PerfoCond = this->BuildBinOp(
               this->getCurScope(), SourceLocation(), BO_EQ, ModOp.get(),
               this->ActOnIntegerConstant(SourceLocation(), 0).get());
@@ -1863,7 +1872,7 @@ StmtResult Sema::ActOnApproxDirective(Stmt *AssociatedStmt,
           BinaryOperator *BO = dyn_cast<BinaryOperator>(B.Inc);
           ExprResult AddOp =
               this->BuildBinOp(this->getCurScope(), SourceLocation(), BO_Add,
-                               BO->getRHS(), PC->getStep());
+                               BO->getRHS(), B.PerfoStep);
           BO->setRHS(AddOp.get());
           break;
         }
@@ -1875,7 +1884,7 @@ StmtResult Sema::ActOnApproxDirective(Stmt *AssociatedStmt,
                                B.UB, this->ActOnIntegerConstant(SourceLocation(), 1).get());
           ExprResult MulOp =
               this->BuildBinOp(this->getCurScope(), SourceLocation(), BO_Mul,
-                               MaxValue.get(), PC->getStep());
+                               MaxValue.get(), B.PerfoStep);
           MulOp = this->PerformImplicitConversion(MulOp.get(),
                                                   BO->getLHS()->getType(),
                                                   /*Action=*/Sema::AA_Casting,
@@ -1890,7 +1899,7 @@ StmtResult Sema::ActOnApproxDirective(Stmt *AssociatedStmt,
           ExprResult SubOp = this->BuildBinOp(
               this->getCurScope(), SourceLocation(), BO_Sub,
               this->ActOnIntegerConstant(SourceLocation(), 1).get(),
-              PC->getStep());
+              B.PerfoStep);
           ExprResult MulOp =
               this->BuildBinOp(this->getCurScope(), SourceLocation(), BO_Mul,
                                SubOp.get(), BO->getRHS());
@@ -1903,50 +1912,7 @@ StmtResult Sema::ActOnApproxDirective(Stmt *AssociatedStmt,
           break;
         }
         case PT_RAND: {
-#if 0
-          DeclContext *Parent = Context.getTranslationUnitDecl();
-          if (getLangOpts().CPlusPlus) {
-            LinkageSpecDecl *CLinkageDecl = LinkageSpecDecl::Create(
-                Context, Parent, SourceLocation(), SourceLocation(),
-                LinkageSpecDecl::lang_c, false);
-            CLinkageDecl->setImplicit();
-            Parent->addDecl(CLinkageDecl);
-            Parent = CLinkageDecl;
-          }
-
-          SmallVector<QualType, 2> ArgTys;
-          ArgTys.push_back(Context.UnsignedIntTy);
-          ArgTys.push_back(Context.FloatTy);
-
-          QualType FunctionTy =
-              Context.getFunctionType(Context.BoolTy, ArgTys, {});
-
-          FunctionDecl *RandF = FunctionDecl::Create(
-              Context, Parent, SourceLocation(),
-              SourceLocation(), &Context.Idents.get("__approx_skip_iteration"),
-              FunctionTy, nullptr, SC_Extern);
-          RandF->setImplicit();
-
-          SmallVector<ParmVarDecl*, 2> Params;
-          Params.push_back(ParmVarDecl::Create(Context, RandF, SourceLocation(),
-                              SourceLocation(), nullptr, ArgTys[0], nullptr,
-                              SC_None, nullptr));
-          Params.push_back(ParmVarDecl::Create(Context, RandF, SourceLocation(),
-                              SourceLocation(), nullptr, ArgTys[1], nullptr,
-                              SC_None, nullptr));
-          RandF->setParams(Params);
-
-          ExprResult DeclRef = this->BuildDeclRefExpr(
-              RandF, RandF->getType(), VK_LValue, SourceLocation());
-
-          SmallVector<Expr *, 2> Args;
-          Args.push_back(B.IterationVarRef);
-          Args.push_back(PC->getStep());
-          ExprResult CallExpr =
-              this->BuildCallExpr(this->getCurScope(), DeclRef.get(), SourceLocation(),
-                                  Args, SourceLocation());
-          B.PerfoRandCond = CallExpr.get();
-#endif
+          // Codegen is performed in CGApproxRuntime.
           break;
         }
         default:
@@ -1958,8 +1924,9 @@ StmtResult Sema::ActOnApproxDirective(Stmt *AssociatedStmt,
     }
   }
 
+  StmtResult CapStmtRes = ActOnCapturedRegionEnd(AssociatedStmt);
   ApproxDirective *Stmt = ApproxDirective::Create(
-      Context, Locs.StartLoc, Locs.EndLoc, AssociatedStmt, Clauses, B);
+      Context, Locs.StartLoc, Locs.EndLoc, CapStmtRes.get(), Clauses, B);
   Stmt->printPretty(dbgs(), nullptr, this->getPrintingPolicy());
   return Stmt;
 }
