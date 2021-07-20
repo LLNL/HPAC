@@ -220,6 +220,8 @@ CGApproxRuntime::CGApproxRuntime(CodeGenModule &CGM)
       StartLoc(SourceLocation()), EndLoc(SourceLocation()), requiresData(false),
       requiresInputs(false) {
   ASTContext &C = CGM.getContext();
+  CodeGen::CodeGenTypes &Types = CGM.getTypes();
+  llvm::PointerType *CharPtrTy = llvm::PointerType::getUnqual(Types.ConvertType(C.CharTy));
   getPerfoInfoType(C, PerfoInfoTy);
   getVarInfoType(C, VarInfoTy);
 
@@ -232,6 +234,7 @@ CGApproxRuntime::CGApproxRuntime(CodeGenModule &CGM)
                    /* Perfo fn ptr*/ llvm::PointerType::getUnqual(CallbackFnTy),
                    /* Captured data ptr*/ CGM.VoidPtrTy,
                    /* Cond Value*/ llvm::Type::getInt1Ty(CGM.getLLVMContext()),
+                   /* Label Name */ CharPtrTy,
                    /* Perfo Description */ CGM.VoidPtrTy,
                    /* Memoization Type*/ CGM.Int32Ty,
                    /* Input Data Descr*/ CGM.VoidPtrTy,
@@ -244,6 +247,9 @@ void CGApproxRuntime::CGApproxRuntimeEnterRegion(CodeGenFunction &CGF,
                                                  CapturedStmt &CS) {
   requiresInputs = false;
   requiresData = false;
+  ASTContext &C = CGM.getContext();
+  CodeGen::CodeGenTypes &Types = CGM.getTypes();
+  llvm::PointerType *CharPtrTy = llvm::PointerType::getUnqual(Types.ConvertType(C.CharTy));
   /// Reset All info of the Runtime "state machine"
   for (unsigned i = ARG_START; i < ARG_END; i++)
     approxRTParams[i] = nullptr;
@@ -264,6 +270,7 @@ void CGApproxRuntime::CGApproxRuntimeEnterRegion(CodeGenFunction &CGF,
   approxRTParams[CapDataPtr] =
       CGF.Builder.CreatePointerCast(CapStructAddr.getPointer(), CGM.VoidPtrTy);
   approxRTParams[Cond] = llvm::ConstantInt::get(CGF.Builder.getInt1Ty(), true);
+  approxRTParams[Label] = llvm::ConstantPointerNull::get(CharPtrTy);
   approxRTParams[PerfoDesc] = llvm::ConstantPointerNull::get(CGM.VoidPtrTy);
   approxRTParams[DataDescIn] = llvm::ConstantPointerNull::get(CGM.VoidPtrTy);
   approxRTParams[DataSizeIn] =
@@ -481,4 +488,22 @@ void CGApproxRuntime::CGApproxRuntimeEmitDataValues(CodeGenFunction &CGF) {
       CGApproxRuntimeEmitData(CGF, Outputs, ".dep.approx_outputs.arr.addr");
   approxRTParams[DataDescOut] = ArrayAddress;
   approxRTParams[DataSizeOut] = NumOfElements;
+}
+
+void CGApproxRuntime::CGApproxRuntimeEmitLabelInit( CodeGenFunction &CGF, ApproxLabelClause &LabelClause){
+  ASTContext &C = CGM.getContext();
+  CodeGen::CodeGenTypes &Types = CGM.getTypes();
+  llvm::PointerType *CharPtrTy = llvm::PointerType::getUnqual(Types.ConvertType(C.CharTy));
+  if (const auto *PreInit = cast_or_null<DeclStmt>(LabelClause.getPreInit())) {
+    for (const auto *D : PreInit->decls()) {
+      CGF.EmitVarDecl(cast<VarDecl>(*D));
+    }
+  }
+  LabelClause.getPreInit()->dump();
+  LValue label = CGF.EmitStringLiteralLValue(cast<StringLiteral>(LabelClause.getLabel()));
+  llvm::Value *Addr = label.getPointer(CGF);
+
+  Addr = CGF.Builder.CreatePointerCast(Addr, CharPtrTy);
+  dbgs() << "Type is " << *(Addr->getType()) << "\n";
+  approxRTParams[Label]  = Addr;
 }

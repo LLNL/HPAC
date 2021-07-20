@@ -2,7 +2,9 @@
 #include <iostream>
 #include <memory>
 #include <string>
+#include <cstring>
 #include <unordered_map>
+#include <cmath>
 
 #include <approx_data_util.h>
 #include <approx_internal.h>
@@ -119,6 +121,7 @@ public:
     // optimal. In essence we can exploit make allocation to depend on the type
     // of the outputs. and allocate large chunks of memory of the same type.
     // Then we can apply better simd operations on these large chunks of memory.
+
     last_values = new uint8_t *[num_outputs];
     for (int i = 0; i < num_outputs; i++) {
       last_values[i] = new uint8_t[outputs[i].num_elem * outputs[i].sz_elem];

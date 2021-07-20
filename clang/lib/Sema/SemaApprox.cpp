@@ -197,6 +197,20 @@ ApproxClause *Sema::ActOnApproxPerfoClause(ClauseKind Kind, PerfoType PType,
   return new (Context) ApproxPerfoClause(PType, StartLoc, EndLoc, LParenLoc, PreInitStmt, Step);
 }
 
+ApproxClause *Sema::ActOnApproxLabelClause(ClauseKind Kind, ApproxVarListLocTy &Locs, Expr *Label){
+  SourceLocation StartLoc = Locs.StartLoc;
+  SourceLocation LParenLoc =Locs.LParenLoc;
+  SourceLocation EndLoc = Locs.EndLoc;
+  Expr *labelExpr = Label;
+  Stmt *PreInitStmt;
+
+  labelExpr = MakeFullExpr(labelExpr).get();
+  llvm::MapVector<const Expr *, DeclRefExpr *> Captures;
+  tryBuildApproxCapture(*this, labelExpr, Captures);
+  PreInitStmt = buildApproxPreInits(Context, Captures);
+  return new (Context) ApproxLabelClause(StartLoc, EndLoc, LParenLoc, PreInitStmt, Label);
+}
+
 ApproxClause *Sema::ActOnApproxMemoClause(ClauseKind Kind,
                                           MemoType MType,
                                           ApproxVarListLocTy &Locs) {
@@ -249,6 +263,7 @@ ApproxClause *Sema::ActOnApproxIfClause(ClauseKind Kind,
   return new (Context)
       ApproxIfClause(StartLoc, EndLoc, LParenLoc, PreInitStmt, Cond);
 }
+
 
 ApproxClause *Sema::ActOnApproxVarList(ClauseKind Kind,
                                        ArrayRef<Expr *> VarList,

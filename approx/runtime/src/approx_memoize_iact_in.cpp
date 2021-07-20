@@ -2,6 +2,7 @@
 #include <iostream>
 #include <memory>
 #include <unordered_map>
+#include <stack>
 
 #include <approx_data_util.h>
 #include <approx_internal.h>
@@ -56,7 +57,6 @@ class MemoizeInput {
       const size_t *offsets = key.parent->input_offsets;
       const size_t *num_elements = key.parent->input_shape;
       const size_t *sz_types = key.parent->input_sz_type;
-      const real_t threshold = key.parent->threshold;
 
       for (int i = 0; i < key.parent->num_inputs; i++) {
         size_t bytes = sz_types[i] * num_elements[i];
@@ -75,6 +75,8 @@ class MemoizeInput {
       KeyDataHashMapIterator;
 
 public:
+  std::stack<uint8_t *> input_memory_pool;
+  std::stack<uint8_t *> output_memory_pool;
   void (*accurate)(void *);
   int num_inputs;
   int num_outputs;
@@ -95,7 +97,6 @@ public:
   size_t *output_offsets;
   size_t total_output_size;
   KeyDataHashMap storage;
-  std::chrono::duration<double> elapsed[END];
 
   /// Stat. Counts how many invocations where performed accurately.
   int accurately;
@@ -108,8 +109,13 @@ public:
                approx_var_info_t *inputs, approx_var_info_t *outputs)
       : accurate(acc), num_inputs(num_inputs), num_outputs(num_outputs),
         input_index(0), output_index(0), accurately(0), approximately(0) {
-
     int i;
+    threshold = 0.0;
+    const char *env_p = std::getenv("THRESHOLD");
+    if (env_p) {
+      threshold = atof(env_p);
+    }
+
     input_shape = new size_t[num_inputs];
     input_types = new ApproxType[num_inputs];
     input_offsets = new size_t[num_inputs];
@@ -142,6 +148,7 @@ public:
     total_input_size = curr_offset;
     size_t elements = total_input_size;
     input_memory = new uint8_t[elements * MEMORY_BLOCKS]();
+    input_memory_pool.push(input_memory);
 
     curr_offset = 0;
     for (i = 0; i < num_outputs; i++) {
@@ -162,16 +169,22 @@ public:
     total_output_size = curr_offset;
     elements = total_output_size;
     output_memory = new uint8_t[elements * MEMORY_BLOCKS]();
+    output_memory_pool.push(output_memory);
 
     counter = 0;
   }
 
   ~MemoizeInput() {
-    for (int i = 0; i < num_inputs; i++) {
-      cout << "Num Elements are :" << input_shape[i] << endl;
+    while (!input_memory_pool.empty()){
+      delete[] input_memory_pool.top();
+      input_memory_pool.pop();
     }
-    delete[] output_memory;
-    delete[] input_memory;
+
+    while (!output_memory_pool.empty()){
+      delete[] output_memory_pool.top();
+      output_memory_pool.pop();
+    }
+
 
     delete[] input_shape;
     delete[] input_types;
@@ -182,21 +195,18 @@ public:
     delete[] output_shape;
     delete[] output_offsets;
 
-    cout << "Num Inputs :" << num_inputs << "num outputs " << num_outputs
-         << endl;
-    cout << "Total Input Size :" << total_input_size << "total_output_size "
-         << total_output_size << endl;
     cout << "APPROX:"
-         << (double)approximately / (double)(accurately + approximately) << ":"
-         << approximately << ":" << accurately << endl;
-    cout << "Performance:";
-    for (int i = 0; i < END; i++)
-      cout << elapsed[i].count() << ":";
-    cout << endl;
-    cout << "Threshold:" << threshold << endl;
+         << (double)approximately / (double)(accurately + approximately)
+         << ":" << approximately<< ":" << accurately << endl;
+
   };
 
   uint8_t *copy_inputs(approx_var_info_t *inputs) {
+    if (input_index + total_input_size > (total_input_size * MEMORY_BLOCKS)){
+      input_memory = new uint8_t[total_input_size * MEMORY_BLOCKS]();
+      input_memory_pool.push(input_memory);
+      input_index = 0;
+    }
     uint8_t *ptr = &input_memory[input_index];
     input_index += total_input_size;
     for (int i = 0; i < num_inputs; i++) {
@@ -207,6 +217,11 @@ public:
   }
 
   uint8_t *copy_outputs(approx_var_info_t *outputs) {
+    if (output_index + total_output_size> (total_output_size * MEMORY_BLOCKS)){
+      output_memory= new uint8_t[total_output_size* MEMORY_BLOCKS]();
+      output_memory_pool.push(output_memory);
+      output_index= 0;
+    }
     uint8_t *ptr = &output_memory[output_index];
     output_index += total_output_size;
     for (int i = 0; i < num_outputs; i++) {
@@ -234,7 +249,6 @@ public:
     } else {
       (*ret.first).first.ptr = copy_inputs(inputs);
       (*ret.first).first.inputs = nullptr;
-
       accurately++;
       accurate(args);
       uint8_t *output_ptr = copy_outputs(outputs);
@@ -253,7 +267,6 @@ public:
   GarbageCollectorMemoIn(){};
   ~GarbageCollectorMemoIn() {
     for (int i = 0; i < last_memoIn; i++) {
-      printf("Deleting memory region\n");
       delete memo_regions[i];
     }
   }
@@ -268,13 +281,14 @@ int memo_find_index(unsigned long Addr) {
   }
   return NOTFOUND;
 }
+
 void memoize_in(void (*accurate)(void *), void *arg, approx_var_info_t *inputs,
                 int num_inputs, approx_var_info_t *outputs, int num_outputs) {
   unsigned long Addr = (unsigned long)accurate;
   int curr_index = memo_find_index(Addr);
   if (curr_index == NOTFOUND) {
     if (last_memoIn >= MAX_REGIONS) {
-      std::cout << "I Reached maximum memo_regions exiting\n";
+      cout << "I Reached maximum memo_regions exiting\n";
       exit(0);
     }
     curr_index = last_memoIn;

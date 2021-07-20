@@ -36,6 +36,7 @@ enum ApproxRTArgsIndex : uint {
   PerfoFn,
   CapDataPtr,
   Cond,
+  Label,
   PerfoDesc,
   MemoDescr,
   DataDescIn,
@@ -100,6 +101,7 @@ public:
                                    ApproxMemoClause &MemoClause);
   void CGApproxRuntimeEmitIfInit(CodeGenFunction &CGF,
                                  ApproxIfClause &IfClause);
+  void CGApproxRuntimeEmitLabelInit(CodeGenFunction &CGF, ApproxLabelClause &LabelCluse);
   void CGApproxRuntimeExitRegion(CodeGenFunction &CGF);
   void CGApproxRuntimeRegisterInputs(ApproxInClause &InClause);
   void CGApproxRuntimeRegisterOutputs(ApproxOutClause &OutClause);

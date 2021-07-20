@@ -24,7 +24,8 @@ set_target_properties(approx PROPERTIES
     LINK_FLAGS ""
     LINKER_LANGUAGE ${LIBAPPROX_LINKER_LANGUAGE})
 
-target_link_libraries(approx ${CMAKE_DL_LIBS})
+target_link_libraries(approx PRIVATE ${CMAKE_DL_LIBS})
+
 string(REGEX MATCH "[0-9]+\\.[0-9]+(\\.[0-9]+)?" CLANG_VERSION ${PACKAGE_VERSION})
 set(LIBAPPROX_HEADERS_INSTALL_PATH "${APPROX_INSTALL_LIBDIR}/clang/${CLANG_VERSION}/include")
 

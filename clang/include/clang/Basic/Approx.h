@@ -30,6 +30,7 @@ enum ClauseKind : uint {
   CK_IN,
   CK_OUT,
   CK_INOUT,
+  CK_LABEL,
   CK_END
 };
 

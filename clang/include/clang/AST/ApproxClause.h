@@ -86,6 +86,40 @@ public:
   static bool classof(const ApproxClause *) { return true; }
 };
 
+class ApproxLabelClause final: public ApproxClause{
+  SourceLocation LParenLoc;
+  Stmt *Label = nullptr;
+  Stmt *PreInit = nullptr;
+
+  public:
+  ApproxLabelClause(SourceLocation StartLoc, SourceLocation EndLoc, SourceLocation LParenLoc, Stmt *PreInit, Expr *Label) :
+  ApproxClause(approx::CK_LABEL, StartLoc, EndLoc), LParenLoc(LParenLoc), Label(Label), PreInit(PreInit){}
+
+  child_range children() {
+    return child_range(child_iterator(), child_iterator());
+  }
+
+  const_child_range children() const {
+    return const_child_range(const_child_iterator(), const_child_iterator());
+  }
+
+  child_range used_children() {
+    return child_range(child_iterator(), child_iterator());
+  }
+  const_child_range used_children() const {
+    return const_child_range(const_child_iterator(), const_child_iterator());
+  }
+
+  static bool classof(const ApproxClause *T) {
+    return T->getClauseKind() == approx::CK_LABEL;
+  }
+
+  Expr* getLabel() {return cast_or_null<Expr>(Label);}
+
+  const Stmt *getPreInit() const { return PreInit; }
+  Stmt *getPreInit() { return PreInit; }
+};
+
 class ApproxPerfoClause final : public ApproxClause {
   approx::PerfoType Type;
   SourceLocation LParenLoc;

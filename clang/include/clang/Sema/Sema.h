@@ -10223,6 +10223,7 @@ public:
   ApproxClause* ActOnApproxUserClause(approx::ClauseKind Kind, approx::ApproxVarListLocTy &Locs);
   ApproxClause* ActOnApproxIfClause(approx::ClauseKind Kind, approx::ApproxVarListLocTy &Locs, Expr *Cond);
   ApproxClause* ActOnApproxVarList(approx::ClauseKind Kind, ArrayRef<Expr *> Vars, approx::ApproxVarListLocTy &Locs);
+  ApproxClause* ActOnApproxLabelClause(approx::ClauseKind Kind, approx::ApproxVarListLocTy &Locs, Expr *Step);
 
   /// Initialization of captured region for OpenMP region.
   void ActOnOpenMPRegionStart(OpenMPDirectiveKind DKind, Scope *CurScope);
