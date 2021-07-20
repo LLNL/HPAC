@@ -30,7 +30,6 @@ const std::string ApproxPerfoClause::PerfoName[approx::PT_END] = {
 const std::string ApproxMemoClause::MemoName[approx::MT_END] = {
     "in", "out"};
 
-
 ApproxInClause *ApproxInClause::Create(const ASTContext &C,
                                        SourceLocation StartLoc,
                                        SourceLocation LParenLoc,
@@ -158,4 +157,11 @@ void ApproxClausePrinter::VisitApproxInOutClause(ApproxInOutClause *Node) {
     OS << "()";
   }
   OS <<" ";
+}
+
+void ApproxClausePrinter::VisitApproxLabelClause(ApproxLabelClause *Node){
+  OS << Node->getAsString();
+  OS << "(";
+  Node->getLabel()->printPretty(OS,nullptr, Policy, 0);
+  OS << ")";
 }

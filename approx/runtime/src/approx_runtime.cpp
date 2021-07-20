@@ -1,5 +1,4 @@
 #include <stdint.h>
-#include <stdio.h>
 #include <string>
 #include <cstring>
 #include <cstdlib>
@@ -9,14 +8,16 @@
 #include <approx.h>
 #include <approx_data_util.h>
 #include <approx_internal.h>
+#include <approx_io.h>
 
 using namespace std;
+#define ENABLE_HDF5 1
 
 #define MEMO_IN 1
 #define MEMO_OUT 2
 
 enum ExecuteMode: uint8_t{
-  EXECUTE,
+  EXECUTE
 };
 
 class ApproxRuntimeConfiguration{
@@ -49,6 +50,39 @@ void _printdeps(approx_var_info_t *vars, int num_deps) {
   }
 }
 
+class ApproxRuntimeConfiguration{
+  ExecuteMode Mode;
+  public:
+  Profiler profiler;
+  BaseDataWriter *data_profiler;
+
+    ApproxRuntimeConfiguration(){
+      const char *env_p = std::getenv("EXECUTE_MODE");
+      if (!env_p){
+        Mode = EXECUTE;
+        return;
+      }
+
+      if (strcmp(env_p, "TIME_PROFILE") == 0){
+        Mode = PROFILE_TIME;
+      }
+      else if ( strcmp(env_p, "DATA_PROFILE") == 0 ){
+        Mode = PROFILE_DATA;
+        data_profiler = new HDF5DataWriter();
+      }
+      else{
+        Mode = EXECUTE;
+      }
+    }
+
+    ~ApproxRuntimeConfiguration(){
+      delete data_profiler;
+    }
+
+    ExecuteMode getMode(){return Mode;}
+};
+
+ApproxRuntimeConfiguration RTEnv;
 
 void __approx_exec_call(void (*accurate)(void *), void (*perforate)(void *),
                         void *arg, bool cond,  const char *region_name, void *perfoArgs, int memo_type,

@@ -23,6 +23,7 @@
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/StringSwitch.h"
 #include <optional>
+#include "llvm/Support/Debug.h"
 using namespace clang;
 
 namespace {
@@ -434,7 +435,8 @@ void Parser::initializePragmaHandlers() {
     OpenMPHandler = std::make_unique<PragmaNoOpenMPHandler>();
   PP.AddPragmaHandler(OpenMPHandler.get());
 
-///Adding pragma handler for approximate pragmas
+  ///Adding pragma handler for approximate pragmas
+  llvm::dbgs() << "Approx Is enalbed : " << getLangOpts().Approx << "\n";
   if ( getLangOpts().Approx ){
     ApproxHandler = std::make_unique<PragmaApproxHandler>();
   }
