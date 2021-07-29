@@ -1,0 +1,464 @@
+diff -Naur ../original_src/rodinia_3.1/openmp/kmeans/kmeans_openmp/CMakeLists.txt kmeans/CMakeLists.txt
+--- ../original_src/rodinia_3.1/openmp/kmeans/kmeans_openmp/CMakeLists.txt	1969-12-31 16:00:00.000000000 -0800
++++ kmeans/CMakeLists.txt	2021-07-29 15:33:58.654643000 -0700
+@@ -0,0 +1,38 @@
++
++include_directories(
++    ${CMAKE_CURRENT_BINARY_DIR}
++)
++
++SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -march=native -fopenmp")
++SET(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -O3 -march=native -fopenmp")
++
++set(SRC_FILES cluster.c  getopt.c  kmeans.c  kmeans_clustering.c)
++set(HEADER_FILES getopt.h  kmeans.h  unistd.h)
++set(APP_NAME "kmeans")
++
++execute_process(COMMAND python3 ${CMAKE_SOURCE_DIR}/configure.py 
++    ${CMAKE_SOURCE_DIR}
++    ${CMAKE_CURRENT_BINARY_DIR} 
++    ${CMAKE_CURRENT_SOURCE_DIR} ${APP_NAME} ${SRC_FILES}
++    OUTPUT_VARIABLE CREATED_FILES)
++
++string(REPLACE " " ";" CREATED_FILES ${CREATED_FILES})
++add_compile_options("-fapprox")
++foreach(DIR_NAME ${CREATED_FILES})
++    string(STRIP ${DIR_NAME} DIR_NAME)
++    set(TMP_SRC "")
++    set(EXE_NAME "${APP_NAME}_${DIR_NAME}.exe")
++    foreach (sf ${SRC_FILES})
++        list(APPEND TMP_SRC "${CMAKE_CURRENT_BINARY_DIR}/${DIR_NAME}/${sf}")
++    endforeach()
++    foreach(hf ${HEADER_FILES})
++        configure_file(${hf} "${CMAKE_CURRENT_BINARY_DIR}/${DIR_NAME}/${hf}" COPYONLY)
++    endforeach()
++
++    add_executable(${EXE_NAME} ${TMP_SRC})
++    target_link_libraries(${EXE_NAME} ${LIBAPPROX_LIB_FILE})
++    target_include_directories(${EXE_NAME} PUBLIC ${APPROX_LIB_UTIL_DIR}/)
++    set_target_properties(${EXE_NAME} PROPERTIES LINK_FLAGS "-lapprox")
++endforeach()
++
++configure_file(kdd_bin kdd_bin COPYONLY)
+diff -Naur ../original_src/rodinia_3.1/openmp/kmeans/kmeans_openmp/Makefile kmeans/Makefile
+--- ../original_src/rodinia_3.1/openmp/kmeans/kmeans_openmp/Makefile	2021-07-27 19:40:04.302230000 -0700
++++ kmeans/Makefile	1969-12-31 16:00:00.000000000 -0800
+@@ -1,24 +0,0 @@
+-# C compiler
+-CC = gcc
+-CC_FLAGS = -g -fopenmp -O2 
+-
+-kmeans: cluster.o getopt.o kmeans.o kmeans_clustering.o 
+-	$(CC) $(CC_FLAGS) cluster.o getopt.o kmeans.o kmeans_clustering.o  -o kmeans
+-
+-%.o: %.[ch]
+-	$(CC) $(CC_FLAGS) $< -c
+-
+-cluster.o: cluster.c 
+-	$(CC) $(CC_FLAGS) cluster.c -c
+-	
+-getopt.o: getopt.c 
+-	$(CC) $(CC_FLAGS) getopt.c -c
+-	
+-kmeans.o: kmeans.c 
+-	$(CC) $(CC_FLAGS) kmeans.c -c
+-
+-kmeans_clustering.o: kmeans_clustering.c kmeans.h
+-	$(CC) $(CC_FLAGS) kmeans_clustering.c -c
+-
+-clean:
+-	rm -f *.o *~ kmeans 
+diff -Naur ../original_src/rodinia_3.1/openmp/kmeans/kmeans_openmp/benchDescr.yaml kmeans/benchDescr.yaml
+--- ../original_src/rodinia_3.1/openmp/kmeans/kmeans_openmp/benchDescr.yaml	1969-12-31 16:00:00.000000000 -0800
++++ kmeans/benchDescr.yaml	2021-07-27 20:51:51.599263000 -0700
+@@ -0,0 +1,7 @@
++kmeans:
++    input: ["kdd_bin"]
++    cmd: '-i <input> -k 5 -l 30 -n 1 -o <output> '
++    measure: 'RUN_TIME:(\d+\.\d+)'
++    metric: 'MPP'
++    quality_pattern: 'OUTPUT_QUALITY:([0-9]*\.?[0-9]+([eE][-+]?[0-9]+)?)'
++    copy: ["kdd_bin"]
+diff -Naur ../original_src/rodinia_3.1/openmp/kmeans/kmeans_openmp/cluster.c kmeans/cluster.c
+--- ../original_src/rodinia_3.1/openmp/kmeans/kmeans_openmp/cluster.c	2021-07-27 19:40:04.309223000 -0700
++++ kmeans/cluster.c	2021-07-27 20:51:51.606276000 -0700
+@@ -75,13 +75,13 @@
+ 
+ 
+ /*---< cluster() >-----------------------------------------------------------*/
+-int cluster(int      numObjects,      /* number of input objects */
++int* cluster(int      numObjects,      /* number of input objects */
+             int      numAttributes,   /* size of attribute of each object */
+             float  **attributes,      /* [numObjects][numAttributes] */            
+             int      nclusters,
+             float    threshold,       /* in:   */
+-            float ***cluster_centres /* out: [best_nclusters][numAttributes] */
+-    
++            float ***cluster_centres, /* out: [best_nclusters][numAttributes] */
++            int *max_iter  
+             )
+ {
+     int    *membership;
+@@ -96,7 +96,7 @@
+                                             numObjects,
+                                             nclusters,
+                                             threshold,
+-                                            membership);      
++                                            membership, max_iter);      
+ 	
+     if (*cluster_centres) {
+ 		free((*cluster_centres)[0]);
+@@ -105,8 +105,8 @@
+     *cluster_centres = tmp_cluster_centres;
+ 
+    
+-	free(membership);
++//	free(membership);
+ 
+-    return 0;
++    return membership;
+ }
+ 
+diff -Naur ../original_src/rodinia_3.1/openmp/kmeans/kmeans_openmp/kmeans.c kmeans/kmeans.c
+--- ../original_src/rodinia_3.1/openmp/kmeans/kmeans_openmp/kmeans.c	2021-07-27 19:40:04.278273000 -0700
++++ kmeans/kmeans.c	2021-07-27 20:51:53.202250000 -0700
+@@ -76,7 +76,10 @@
+ #include <sys/types.h>
+ #include <fcntl.h>
+ #include <omp.h>
++#include <approx.h>
+ #include "getopt.h"
++#include <executionTime.h>
++
+ 
+ #include "kmeans.h"
+ 
+@@ -90,35 +93,38 @@
+         "Usage: %s [switches] -i filename\n"
+         "       -i filename     		: file containing data to be clustered\n"
+         "       -b                 	: input file is in binary format\n"
+-		"       -k                 	: number of clusters (default is 5) \n"
++        "       -k                 	: number of clusters (default is 5) \n"
+         "       -t threshold		: threshold value\n"
+-		"       -n no. of threads	: number of threads";
++        "       -n no. of threads	: number of threads";
+     fprintf(stderr, help, argv0);
+     exit(-1);
+ }
+ 
+ /*---< main() >-------------------------------------------------------------*/
+ int main(int argc, char **argv) {
+-           int     opt;
++    int     opt;
+     extern char   *optarg;
+     extern int     optind;
+-           int     nclusters=5;
+-           char   *filename = 0;           
+-           float  *buf;
+-           float **attributes;
+-           float **cluster_centres=NULL;
+-           int     i, j;
+-                
+-           int     numAttributes;
+-           int     numObjects;        
+-           char    line[1024];           
+-           int     isBinaryFile = 0;
+-           int     nloops = 1;
+-           float   threshold = 0.001;
+-		   double  timing;		   
++    int     nclusters=5;
++    char   *filename = 0;           
++    float  *buf;
++    float **attributes;
++    float **cluster_centres=NULL;
++    int     i, j;
++
++    int     numAttributes;
++    int     numObjects;        
++    char    line[1024];           
++    int     isBinaryFile = 0;
++    int     nloops = 1;
++    float   threshold = 0.001;
++    double  timing;		   
++    int iterations;
++    char *memberShipName = NULL;
++
+ 
+-	while ( (opt=getopt(argc,argv,"i:k:t:b:n:?"))!= EOF) {
+-		switch (opt) {
++    while ( (opt=getopt(argc,argv,"i:k:t:b:n:l:o:?"))!= EOF) {
++        switch (opt) {
+             case 'i': filename=optarg;
+                       break;
+             case 'b': isBinaryFile = 1;
+@@ -127,12 +133,17 @@
+                       break;
+             case 'k': nclusters = atoi(optarg);
+                       break;			
+-			case 'n': num_omp_threads = atoi(optarg);
+-					  break;
++            case 'n': num_omp_threads = omp_get_max_threads();
++                      break;
++            case 'o': memberShipName =  optarg;
++                      break;
++            case 'l': iterations= atoi(optarg);
++                      printf("Iterations are %d\n",iterations);
++                      break;
+             case '?': usage(argv[0]);
+                       break;
+             default: usage(argv[0]);
+-                      break;
++                     break;
+         }
+     }
+ 
+@@ -142,99 +153,85 @@
+     numAttributes = numObjects = 0;
+ 
+     /* from the input file, get the numAttributes and numObjects ------------*/
+-   
+-    if (isBinaryFile) {
+-        int infile;
+-        if ((infile = open(filename, O_RDONLY, "0600")) == -1) {
+-            fprintf(stderr, "Error: no such file (%s)\n", filename);
+-            exit(1);
+-        }
+-        read(infile, &numObjects,    sizeof(int));
+-        read(infile, &numAttributes, sizeof(int));
+-   
+-
+-        /* allocate space for attributes[] and read attributes of all objects */
+-        buf           = (float*) malloc(numObjects*numAttributes*sizeof(float));
+-        attributes    = (float**)malloc(numObjects*             sizeof(float*));
+-        attributes[0] = (float*) malloc(numObjects*numAttributes*sizeof(float));
+-        for (i=1; i<numObjects; i++)
+-            attributes[i] = attributes[i-1] + numAttributes;
+-
+-        read(infile, buf, numObjects*numAttributes*sizeof(float));
+ 
+-        close(infile);
++    FILE *infile;
++    if ((infile= fopen(filename, "rb")) == NULL) {
++        fprintf(stderr, "Error: no such file (%s)\n", filename);
++        exit(1);
+     }
+-    else {
+-        FILE *infile;
+-        if ((infile = fopen(filename, "r")) == NULL) {
+-            fprintf(stderr, "Error: no such file (%s)\n", filename);
+-            exit(1);
+-        }
+-        while (fgets(line, 1024, infile) != NULL)
+-            if (strtok(line, " \t\n") != 0)
+-                numObjects++;
+-        rewind(infile);
+-        while (fgets(line, 1024, infile) != NULL) {
+-            if (strtok(line, " \t\n") != 0) {
+-                /* ignore the id (first attribute): numAttributes = 1; */
+-                while (strtok(NULL, " ,\t\n") != NULL) numAttributes++;
+-                break;
+-            }
+-        }
+-     
+ 
+-        /* allocate space for attributes[] and read attributes of all objects */
+-        buf           = (float*) malloc(numObjects*numAttributes*sizeof(float));
+-        attributes    = (float**)malloc(numObjects*             sizeof(float*));
+-        attributes[0] = (float*) malloc(numObjects*numAttributes*sizeof(float));
+-        for (i=1; i<numObjects; i++)
+-            attributes[i] = attributes[i-1] + numAttributes;
+-        rewind(infile);
+-        i = 0;
+-        while (fgets(line, 1024, infile) != NULL) {
+-            if (strtok(line, " \t\n") == NULL) continue; 
+-            for (j=0; j<numAttributes; j++) {
+-                buf[i] = atof(strtok(NULL, " ,\t\n"));
+-                i++;
+-            }
+-        }
+-        fclose(infile);
+-    }     
+-	printf("I/O completed\n");	
++    int tmp;
++    size_t tmp1;
++    fread(&tmp1, sizeof(size_t),1,infile);
++    fread(&tmp, sizeof(int),1,infile);
++    fread(&numObjects, sizeof(int), 1, infile);
++
++    fread(&tmp1, sizeof(size_t),1,infile);
++    fread(&tmp, sizeof(int),1,infile);
++    fread(&numAttributes , sizeof(int), 1, infile);
++
++    /* allocate space for attributes[] and read attributes of all objects */
++    buf           = (float*) malloc(numObjects*numAttributes*sizeof(float));
++    attributes    = (float**)malloc(numObjects*             sizeof(float*));
++    attributes[0] = (float*) malloc(numObjects*numAttributes*sizeof(float));
++    for (i=1; i<numObjects; i++)
++        attributes[i] = attributes[i-1] + numAttributes;
++    
++    fread(&tmp1, sizeof(size_t), 1, infile);
++    fread(&tmp, sizeof(int), 1, infile);
++    fread(buf, sizeof(float), numObjects*numAttributes, infile);
++    fclose(infile);
++
++    printf("I/O completed\n");	
+ 
+-	memcpy(attributes[0], buf, numObjects*numAttributes*sizeof(float));
++    memcpy(attributes[0], buf, numObjects*numAttributes*sizeof(float));
+ 
+-	timing = omp_get_wtime();
++
++    int *membership;
++    startMeasure();
+     for (i=0; i<nloops; i++) {
+-        
++
+         cluster_centres = NULL;
+-        cluster(numObjects,
++        membership = cluster(numObjects,
+                 numAttributes,
+                 attributes,           /* [numObjects][numAttributes] */                
+                 nclusters,
+                 threshold,
+-                &cluster_centres   
+-               );
+-     
++                &cluster_centres, 
++                &iterations
++                );
++
+     }
+-    timing = omp_get_wtime() - timing;
+-	
++    stopMeasure();
+ 
+-	printf("number of Clusters %d\n",nclusters); 
+-	printf("number of Attributes %d\n\n",numAttributes); 
+-  /*  	printf("Cluster Centers Output\n"); 
+-	printf("The first number is cluster number and the following data is arribute value\n");
+-	printf("=============================================================================\n\n");
+-	
+-    for (i=0; i< nclusters; i++) {
+-		printf("%d: ", i);
+-        for (j=0; j<numAttributes; j++)
+-            printf("%.2f ", cluster_centres[i][j]);
+-        printf("\n\n");
++    if ( memberShipName != NULL ){
++        printf("I am creating output, %s\n", memberShipName);
++        size_t tmpSize = numObjects;
++        int type = 2; 
++        FILE *fd= fopen(memberShipName,"w");
++        fwrite(&tmpSize, sizeof(size_t), 1, fd);
++        fwrite(&type, sizeof(int), 1, fd);
++        fwrite(membership, sizeof(int), tmpSize, fd);
++        fclose(fd);
+     }
+-*/
+-	printf("Time for process: %f\n", timing);
+ 
++
++    printf("number of Clusters %d\n",nclusters); 
++    printf("number of Attributes %d\n\n",numAttributes); 
++    /*  	printf("Cluster Centers Output\n"); 
++            printf("The first number is cluster number and the following data is arribute value\n");
++            printf("=============================================================================\n\n");
++
++            for (i=0; i< nclusters; i++) {
++            printf("%d: ", i);
++            for (j=0; j<numAttributes; j++)
++            printf("%.2f ", cluster_centres[i][j]);
++            printf("\n\n");
++            }
++            */
++    printf("Time for process: %f\n", timing);
++
++    free(membership);
+     free(attributes);
+     free(cluster_centres[0]);
+     free(cluster_centres);
+diff -Naur ../original_src/rodinia_3.1/openmp/kmeans/kmeans_openmp/kmeans.h kmeans/kmeans.h
+--- ../original_src/rodinia_3.1/openmp/kmeans/kmeans_openmp/kmeans.h	2021-07-27 19:40:04.282245000 -0700
++++ kmeans/kmeans.h	2021-07-27 20:51:53.208264000 -0700
+@@ -44,10 +44,10 @@
+ #endif
+ 
+ /* cluster.c */
+-int     cluster(int, int, float**, int, float, float***);
++int*     cluster(int, int, float**, int, float, float***, int *);
+ 
+ /* kmeans_clustering.c */
+-float **kmeans_clustering(float**, int, int, int, float, int*);
++float **kmeans_clustering(float**, int, int, int, float, int*, int *);
+ float   euclid_dist_2        (float*, float*, int);
+ int     find_nearest_point   (float* , int, float**, int);
+ 
+diff -Naur ../original_src/rodinia_3.1/openmp/kmeans/kmeans_openmp/kmeans_clustering.c kmeans/kmeans_clustering.c
+--- ../original_src/rodinia_3.1/openmp/kmeans/kmeans_openmp/kmeans_clustering.c	2021-07-27 19:40:04.289223000 -0700
++++ kmeans/kmeans_clustering.c	2021-07-27 20:51:53.214252000 -0700
+@@ -65,6 +65,7 @@
+ #include <math.h>
+ #include "kmeans.h"
+ #include <omp.h>
++#include <approx.h>
+ 
+ #define RANDOM_MAX 2147483647
+ 
+@@ -86,6 +87,7 @@
+     /* find the cluster center id with min distance to pt */
+     for (i=0; i<npts; i++) {
+         float dist;
++//@APPROX LABEL("euclid_dist_2") IN(pt[0:nfeatures], pts[i][0:nfeatures]) OUT(dist) APPROX_TECH(MEMO_IN|MEMO_OUT)
+         dist = euclid_dist_2(pt, pts[i], nfeatures);  /* no need square root */
+         if (dist < min_dist) {
+             min_dist = dist;
+@@ -105,6 +107,7 @@
+     int i;
+     float ans=0.0;
+ 
++//@APPROX APPROX_TECH(PERFO) LABEL("euclid_dist_2")
+     for (i=0; i<numdims; i++)
+         ans += (pt1[i]-pt2[i]) * (pt1[i]-pt2[i]);
+ 
+@@ -118,7 +121,7 @@
+                           int     npoints,
+                           int     nclusters,
+                           float   threshold,
+-                          int    *membership) /* out: [npoints] */
++                          int    *membership, int *max_iter) /* out: [npoints] */
+ {
+ 
+     int      i, j, k, n=0, index, loop=0;
+@@ -176,14 +179,13 @@
+         for (j=0; j<nclusters; j++)
+             partial_new_centers[i][j] = (float*)calloc(nfeatures, sizeof(float));
+ 	}
+-	printf("num of threads = %d\n", num_omp_threads);
+     do {
+         delta = 0.0;
+-		omp_set_num_threads(num_omp_threads);
+ 		#pragma omp parallel \
+                 shared(feature,clusters,membership,partial_new_centers,partial_new_centers_len)
+         {
+             int tid = omp_get_thread_num();				
++//@APPROX LABEL("find_nearest_point") APPROX_TECH(PERFO)
+             #pragma omp for \
+                         private(i,j,index) \
+                         firstprivate(npoints,nclusters,nfeatures) \
+@@ -191,6 +193,7 @@
+                         reduction(+:delta)
+             for (i=0; i<npoints; i++) {
+ 	        /* find the index of nestest cluster centers */					
++//@APPROX LABEL("find_nearest_point") IN(feature[i][0:nfeatures]) OUT(index) APPROX_TECH(MEMO_IN|MEMO_OUT)
+ 	        index = find_nearest_point(feature[i],
+ 		             nfeatures,
+ 		             clusters,
+@@ -231,7 +234,8 @@
+ 			new_centers_len[i] = 0;   /* set back to 0 */
+ 		}
+         
+-    } while (delta > threshold && loop++ < 500);
++    } while (delta > threshold && loop++ < *max_iter);
++    printf("Exeucted %d %d loops\n", delta, loop);
+ 
+     
+     free(new_centers[0]);
