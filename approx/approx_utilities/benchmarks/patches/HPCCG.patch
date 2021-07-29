@@ -1,0 +1,4214 @@
+diff -Naur ../original_src/HPCCG/CMakeLists.txt HPCCG/CMakeLists.txt
+--- ../original_src/HPCCG/CMakeLists.txt	1969-12-31 16:00:00.000000000 -0800
++++ HPCCG/CMakeLists.txt	2021-07-29 15:33:19.949335000 -0700
+@@ -0,0 +1,31 @@
++
++include_directories(
++    ${CMAKE_CURRENT_BINARY_DIR}
++)
++
++SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -fopenmp -march=native")
++
++set(SRC_FILES "main.cpp")
++set(APP_NAME "HPCCG")
++
++execute_process(COMMAND python3 ${CMAKE_SOURCE_DIR}/configure.py 
++    ${CMAKE_SOURCE_DIR}
++    ${CMAKE_CURRENT_BINARY_DIR} 
++    ${CMAKE_CURRENT_SOURCE_DIR} ${APP_NAME} ${SRC_FILES}
++    OUTPUT_VARIABLE CREATED_FILES)
++
++string(REPLACE " " ";" CREATED_FILES ${CREATED_FILES})
++add_compile_options("-fapprox")
++foreach(DIR_NAME ${CREATED_FILES})
++    string(STRIP ${DIR_NAME} DIR_NAME)
++    set(TMP_SRC "")
++    set(EXE_NAME "${APP_NAME}_${DIR_NAME}.exe")
++    foreach (sf ${SRC_FILES})
++        list(APPEND TMP_SRC "${CMAKE_CURRENT_BINARY_DIR}/${DIR_NAME}/${sf}")
++    endforeach()
++    add_executable(${EXE_NAME} ${TMP_SRC})
++    target_link_libraries(${EXE_NAME} ${LIBAPPROX_LIB_FILE})
++    target_include_directories(${EXE_NAME} PUBLIC ${APPROX_LIB_UTIL_DIR}/)
++    set_target_properties(${EXE_NAME} PROPERTIES LINK_FLAGS "-lapprox")
++endforeach()
++
+diff -Naur ../original_src/HPCCG/HPCCG.cpp HPCCG/HPCCG.cpp
+--- ../original_src/HPCCG/HPCCG.cpp	2021-07-27 19:36:39.130241000 -0700
++++ HPCCG/HPCCG.cpp	1969-12-31 16:00:00.000000000 -0800
+@@ -1,161 +0,0 @@
+-
+-//@HEADER
+-// ************************************************************************
+-// 
+-//               HPCCG: Simple Conjugate Gradient Benchmark Code
+-//                 Copyright (2006) Sandia Corporation
+-// 
+-// Under terms of Contract DE-AC04-94AL85000, there is a non-exclusive
+-// license for use of this work by or on behalf of the U.S. Government.
+-// 
+-// BSD 3-Clause License
+-// 
+-// Redistribution and use in source and binary forms, with or without
+-// modification, are permitted provided that the following conditions are met:
+-// 
+-// * Redistributions of source code must retain the above copyright notice, this
+-//   list of conditions and the following disclaimer.
+-// 
+-// * Redistributions in binary form must reproduce the above copyright notice,
+-//   this list of conditions and the following disclaimer in the documentation
+-//   and/or other materials provided with the distribution.
+-// 
+-// * Neither the name of the copyright holder nor the names of its
+-//   contributors may be used to endorse or promote products derived from
+-//   this software without specific prior written permission.
+-// 
+-// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+-// AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+-// IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+-// DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+-// FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+-// DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+-// SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+-// CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+-// OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+-// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+-// 
+-// Questions? Contact Michael A. Heroux (maherou@sandia.gov) 
+-// 
+-// ************************************************************************
+-//@HEADER
+-/////////////////////////////////////////////////////////////////////////
+-
+-// Routine to compute an approximate solution to Ax = b where:
+-
+-// A - known matrix stored as an HPC_Sparse_Matrix struct
+-
+-// b - known right hand side vector
+-
+-// x - On entry is initial guess, on exit new approximate solution
+-
+-// max_iter - Maximum number of iterations to perform, even if
+-//            tolerance is not met.
+-
+-// tolerance - Stop and assert convergence if norm of residual is <=
+-//             to tolerance.
+-
+-// niters - On output, the number of iterations actually performed.
+-
+-/////////////////////////////////////////////////////////////////////////
+-
+-#include <iostream>
+-using std::cout;
+-using std::cerr;
+-using std::endl;
+-#include <cmath>
+-#include "mytimer.hpp"
+-#include "HPCCG.hpp"
+-
+-#define TICK()  t0 = mytimer() // Use TICK and TOCK to time a code section
+-#define TOCK(t) t += mytimer() - t0
+-int HPCCG(HPC_Sparse_Matrix * A,
+-	  const double * const b, double * const x,
+-	  const int max_iter, const double tolerance, int &niters, double & normr,
+-	  double * times)
+-
+-{
+-  double t_begin = mytimer();  // Start timing right away
+-
+-  double t0 = 0.0, t1 = 0.0, t2 = 0.0, t3 = 0.0, t4 = 0.0;
+-#ifdef USING_MPI
+-  double t5 = 0.0;
+-#endif
+-  int nrow = A->local_nrow;
+-  int ncol = A->local_ncol;
+-
+-  double * r = new double [nrow];
+-  double * p = new double [ncol]; // In parallel case, A is rectangular
+-  double * Ap = new double [nrow];
+-
+-  normr = 0.0;
+-  double rtrans = 0.0;
+-  double oldrtrans = 0.0;
+-
+-#ifdef USING_MPI
+-  int rank; // Number of MPI processes, My process ID
+-  MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+-#else
+-  int rank = 0; // Serial case (not using MPI)
+-#endif
+-
+-  int print_freq = max_iter/10; 
+-  if (print_freq>50) print_freq=50;
+-  if (print_freq<1)  print_freq=1;
+-
+-  // p is of length ncols, copy x to p for sparse MV operation
+-  TICK(); waxpby(nrow, 1.0, x, 0.0, x, p); TOCK(t2);
+-#ifdef USING_MPI
+-  TICK(); exchange_externals(A,p); TOCK(t5); 
+-#endif
+-  TICK(); HPC_sparsemv(A, p, Ap); TOCK(t3);
+-  TICK(); waxpby(nrow, 1.0, b, -1.0, Ap, r); TOCK(t2);
+-  TICK(); ddot(nrow, r, r, &rtrans, t4); TOCK(t1);
+-  normr = sqrt(rtrans);
+-
+-  if (rank==0) cout << "Initial Residual = "<< normr << endl;
+-
+-  for(int k=1; k<max_iter && normr > tolerance; k++ )
+-    {
+-      if (k == 1)
+-	{
+-	  TICK(); waxpby(nrow, 1.0, r, 0.0, r, p); TOCK(t2);
+-	}
+-      else
+-	{
+-	  oldrtrans = rtrans;
+-	  TICK(); ddot (nrow, r, r, &rtrans, t4); TOCK(t1);// 2*nrow ops
+-	  double beta = rtrans/oldrtrans;
+-	  TICK(); waxpby (nrow, 1.0, r, beta, p, p);  TOCK(t2);// 2*nrow ops
+-	}
+-      normr = sqrt(rtrans);
+-      if (rank==0 && (k%print_freq == 0 || k+1 == max_iter))
+-      cout << "Iteration = "<< k << "   Residual = "<< normr << endl;
+-     
+-
+-#ifdef USING_MPI
+-      TICK(); exchange_externals(A,p); TOCK(t5); 
+-#endif
+-      TICK(); HPC_sparsemv(A, p, Ap); TOCK(t3); // 2*nnz ops
+-      double alpha = 0.0;
+-      TICK(); ddot(nrow, p, Ap, &alpha, t4); TOCK(t1); // 2*nrow ops
+-      alpha = rtrans/alpha;
+-      TICK(); waxpby(nrow, 1.0, x, alpha, p, x);// 2*nrow ops
+-      waxpby(nrow, 1.0, r, -alpha, Ap, r);  TOCK(t2);// 2*nrow ops
+-      niters = k;
+-    }
+-
+-  // Store times
+-  times[1] = t1; // ddot time
+-  times[2] = t2; // waxpby time
+-  times[3] = t3; // sparsemv time
+-  times[4] = t4; // AllReduce time
+-#ifdef USING_MPI
+-  times[5] = t5; // exchange boundary time
+-#endif
+-  delete [] p;
+-  delete [] Ap;
+-  delete [] r;
+-  times[0] = mytimer() - t_begin;  // Total time. All done...
+-  return(0);
+-}
+diff -Naur ../original_src/HPCCG/HPCCG.hpp HPCCG/HPCCG.hpp
+--- ../original_src/HPCCG/HPCCG.hpp	2021-07-27 19:36:39.134229000 -0700
++++ HPCCG/HPCCG.hpp	1969-12-31 16:00:00.000000000 -0800
+@@ -1,72 +0,0 @@
+-
+-//@HEADER
+-// ************************************************************************
+-// 
+-//               HPCCG: Simple Conjugate Gradient Benchmark Code
+-//                 Copyright (2006) Sandia Corporation
+-// 
+-// Under terms of Contract DE-AC04-94AL85000, there is a non-exclusive
+-// license for use of this work by or on behalf of the U.S. Government.
+-// 
+-// BSD 3-Clause License
+-// 
+-// Redistribution and use in source and binary forms, with or without
+-// modification, are permitted provided that the following conditions are met:
+-// 
+-// * Redistributions of source code must retain the above copyright notice, this
+-//   list of conditions and the following disclaimer.
+-// 
+-// * Redistributions in binary form must reproduce the above copyright notice,
+-//   this list of conditions and the following disclaimer in the documentation
+-//   and/or other materials provided with the distribution.
+-// 
+-// * Neither the name of the copyright holder nor the names of its
+-//   contributors may be used to endorse or promote products derived from
+-//   this software without specific prior written permission.
+-// 
+-// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+-// AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+-// IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+-// DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+-// FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+-// DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+-// SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+-// CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+-// OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+-// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+-// 
+-// Questions? Contact Michael A. Heroux (maherou@sandia.gov) 
+-// 
+-// ************************************************************************
+-//@HEADER
+-
+-#ifndef HPCCG_H
+-#define HPCCG_H
+-#include "HPC_sparsemv.hpp"
+-#include "ddot.hpp"
+-#include "waxpby.hpp"
+-#include "HPC_Sparse_Matrix.hpp"
+-
+-#ifdef USING_MPI
+-#include "exchange_externals.hpp"
+-#include <mpi.h> // If this routine is compiled with -DUSING_MPI
+-                 // then include mpi.h
+-#endif
+-int HPCCG(HPC_Sparse_Matrix * A,
+-	  const double * const b, double * const x,
+-	  const int max_iter, const double tolerance, int & niters, double & normr, double * times);
+-
+-// this function will compute the Conjugate Gradient...
+-// A <=> Matrix
+-// b <=> constant
+-// xnot <=> initial guess
+-// max_iter <=> how many times we iterate
+-// tolerance <=> specifies how "good"of a value we would like
+-// x <=> used for return value
+-
+-// A is known
+-// x is unknown vector
+-// b is known vector
+-// xnot = 0
+-// niters is the number of iterations
+-#endif
+diff -Naur ../original_src/HPCCG/HPC_Sparse_Matrix.cpp HPCCG/HPC_Sparse_Matrix.cpp
+--- ../original_src/HPCCG/HPC_Sparse_Matrix.cpp	2021-07-27 19:36:39.138245000 -0700
++++ HPCCG/HPC_Sparse_Matrix.cpp	1969-12-31 16:00:00.000000000 -0800
+@@ -1,199 +0,0 @@
+-
+-//@HEADER
+-// ************************************************************************
+-// 
+-//               HPCCG: Simple Conjugate Gradient Benchmark Code
+-//                 Copyright (2006) Sandia Corporation
+-// 
+-// Under terms of Contract DE-AC04-94AL85000, there is a non-exclusive
+-// license for use of this work by or on behalf of the U.S. Government.
+-// 
+-// BSD 3-Clause License
+-// 
+-// Redistribution and use in source and binary forms, with or without
+-// modification, are permitted provided that the following conditions are met:
+-// 
+-// * Redistributions of source code must retain the above copyright notice, this
+-//   list of conditions and the following disclaimer.
+-// 
+-// * Redistributions in binary form must reproduce the above copyright notice,
+-//   this list of conditions and the following disclaimer in the documentation
+-//   and/or other materials provided with the distribution.
+-// 
+-// * Neither the name of the copyright holder nor the names of its
+-//   contributors may be used to endorse or promote products derived from
+-//   this software without specific prior written permission.
+-// 
+-// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+-// AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+-// IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+-// DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+-// FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+-// DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+-// SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+-// CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+-// OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+-// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+-// 
+-// Questions? Contact Michael A. Heroux (maherou@sandia.gov) 
+-// 
+-// ************************************************************************
+-//@HEADER
+-#include "HPC_Sparse_Matrix.hpp"
+-
+-#ifdef USING_MPI
+-#include <mpi.h>
+-#endif
+-
+-////////////////////////////////////////////////////////////////////////////////
+-////////////////////////////////////////////////////////////////////////////////
+-void destroyMatrix(HPC_Sparse_Matrix * &A)
+-{
+-  if(A->title)
+-  {
+-    delete [] A->title;
+-  }
+-  if(A->nnz_in_row)
+-  {
+-    delete [] A->nnz_in_row;
+-  }
+-  if(A->list_of_vals)
+-  {
+-    delete [] A->list_of_vals;
+-  }
+-  if(A->ptr_to_vals_in_row !=0)
+-  {
+-    delete [] A->ptr_to_vals_in_row;
+-  }
+-  if(A->list_of_inds)
+-  {
+-    delete [] A->list_of_inds;
+-  }
+-  if(A->ptr_to_inds_in_row !=0)
+-  {
+-    delete [] A->ptr_to_inds_in_row;
+-  }
+-  if(A->ptr_to_diags)
+-  {
+-    delete [] A->ptr_to_diags;
+-  }
+-
+-#ifdef USING_MPI
+-  if(A->external_index)
+-  {
+-    delete [] A->external_index;
+-  }
+-  if(A->external_local_index)
+-  {
+-    delete [] A->external_local_index;
+-  }
+-  if(A->elements_to_send)
+-  {
+-    delete [] A->elements_to_send;
+-  }
+-  if(A->neighbors)
+-  {
+-    delete [] A->neighbors;
+-  }
+-  if(A->recv_length)
+-  {
+-    delete [] A->recv_length;
+-  }
+-  if(A->send_length)
+-  {
+-    delete [] A->send_length;
+-  }
+-  if(A->send_buffer)
+-  {
+-    delete [] A->send_buffer;
+-  }
+-#endif
+-
+-  delete A;
+-  A = 0;
+-}
+-////////////////////////////////////////////////////////////////////////////////
+-
+-
+-////////////////////////////////////////////////////////////////////////////////
+-////////////////////////////////////////////////////////////////////////////////
+-#ifdef USING_SHAREDMEM_MPI
+-#ifndef SHAREDMEM_ALTERNATIVE
+-void destroySharedMemMatrix(HPC_Sparse_Matrix * &A)
+-{
+-  if(A==0)
+-  {
+-    return; //noop
+-  }
+-
+-  if(A->title)
+-  {
+-    delete [] A->title;
+-  }
+-
+-  if(A->nnz_in_row)
+-  {
+-    MPI_Comm_free_mem(MPI_COMM_NODE,A->nnz_in_row);
+-  }
+-  if(A->list_of_vals)
+-  {
+-    MPI_Comm_free_mem(MPI_COMM_NODE,A->list_of_vals);
+-  }
+-  if(A->ptr_to_vals_in_row !=0)
+-  {
+-    MPI_Comm_free_mem(MPI_COMM_NODE,A->ptr_to_vals_in_row);
+-  }
+-  if(A->list_of_inds)
+-  {
+-    MPI_Comm_free_mem(MPI_COMM_NODE,A->list_of_inds);
+-  }
+-  if(A->ptr_to_inds_in_row !=0)
+-  {
+-    MPI_Comm_free_mem(MPI_COMM_NODE,A->ptr_to_inds_in_row);
+-  }
+-
+-  // currently not allocated with shared memory
+-  if(A->ptr_to_diags)
+-  {
+-    delete [] A->ptr_to_diags;
+-  }
+-
+-
+-#ifdef USING_MPI
+-  if(A->external_index)
+-  {
+-    delete [] A->external_index;
+-  }
+-  if(A->external_local_index)
+-  {
+-    delete [] A->external_local_index;
+-  }
+-  if(A->elements_to_send)
+-  {
+-    delete [] A->elements_to_send;
+-  }
+-  if(A->neighbors)
+-  {
+-    delete [] A->neighbors;
+-  }
+-  if(A->recv_length)
+-  {
+-    delete [] A->recv_length;
+-  }
+-  if(A->send_length)
+-  {
+-    delete [] A->send_length;
+-  }
+-  if(A->send_buffer)
+-  {
+-    delete [] A->send_buffer;
+-  }
+-#endif
+-
+-  MPI_Comm_free_mem(MPI_COMM_NODE,A); A=0;
+-
+-}
+-#endif
+-#endif
+-////////////////////////////////////////////////////////////////////////////////
+-
+diff -Naur ../original_src/HPCCG/HPC_Sparse_Matrix.hpp HPCCG/HPC_Sparse_Matrix.hpp
+--- ../original_src/HPCCG/HPC_Sparse_Matrix.hpp	2021-07-27 19:36:39.143238000 -0700
++++ HPCCG/HPC_Sparse_Matrix.hpp	1969-12-31 16:00:00.000000000 -0800
+@@ -1,97 +0,0 @@
+-
+-//@HEADER
+-// ************************************************************************
+-// 
+-//               HPCCG: Simple Conjugate Gradient Benchmark Code
+-//                 Copyright (2006) Sandia Corporation
+-// 
+-// Under terms of Contract DE-AC04-94AL85000, there is a non-exclusive
+-// license for use of this work by or on behalf of the U.S. Government.
+-// 
+-// BSD 3-Clause License
+-// 
+-// Redistribution and use in source and binary forms, with or without
+-// modification, are permitted provided that the following conditions are met:
+-// 
+-// * Redistributions of source code must retain the above copyright notice, this
+-//   list of conditions and the following disclaimer.
+-// 
+-// * Redistributions in binary form must reproduce the above copyright notice,
+-//   this list of conditions and the following disclaimer in the documentation
+-//   and/or other materials provided with the distribution.
+-// 
+-// * Neither the name of the copyright holder nor the names of its
+-//   contributors may be used to endorse or promote products derived from
+-//   this software without specific prior written permission.
+-// 
+-// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+-// AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+-// IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+-// DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+-// FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+-// DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+-// SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+-// CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+-// OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+-// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+-// 
+-// Questions? Contact Michael A. Heroux (maherou@sandia.gov) 
+-// 
+-// ************************************************************************
+-//@HEADER
+-
+-#ifndef HPC_SPARSE_MATRIX_H
+-#define HPC_SPARSE_MATRIX_H
+-
+-// These constants are upper bounds that might need to be changes for 
+-// pathological matrices, e.g., those with nearly dense rows/columns.
+-
+-const int max_external = 100000;
+-const int max_num_messages = 500;
+-const int max_num_neighbors = max_num_messages;
+-
+-
+-struct HPC_Sparse_Matrix_STRUCT {
+-  char   *title;
+-  int start_row;
+-  int stop_row;
+-  int total_nrow;
+-  long long total_nnz;
+-  int local_nrow;
+-  int local_ncol;  // Must be defined in make_local_matrix
+-  int local_nnz;
+-  int  * nnz_in_row;
+-  double ** ptr_to_vals_in_row;
+-  int ** ptr_to_inds_in_row;
+-  double ** ptr_to_diags;
+-
+-#ifdef USING_MPI
+-  int num_external;
+-  int num_send_neighbors;
+-  int *external_index;
+-  int *external_local_index;
+-  int total_to_be_sent;
+-  int *elements_to_send;
+-  int *neighbors;
+-  int *recv_length;
+-  int *send_length;
+-  double *send_buffer;
+-#endif
+-
+-  double *list_of_vals;   //needed for cleaning up memory
+-  int *list_of_inds;      //needed for cleaning up memory
+-
+-};
+-typedef struct HPC_Sparse_Matrix_STRUCT HPC_Sparse_Matrix;
+-
+-
+-void destroyMatrix(HPC_Sparse_Matrix * &A);
+-
+-#ifdef USING_SHAREDMEM_MPI
+-#ifndef SHAREDMEM_ALTERNATIVE
+-void destroySharedMemMatrix(HPC_Sparse_Matrix * &A);
+-#endif
+-#endif
+-
+-#endif
+-
+diff -Naur ../original_src/HPCCG/HPC_sparsemv.cpp HPCCG/HPC_sparsemv.cpp
+--- ../original_src/HPCCG/HPC_sparsemv.cpp	2021-07-27 19:36:39.147244000 -0700
++++ HPCCG/HPC_sparsemv.cpp	1969-12-31 16:00:00.000000000 -0800
+@@ -1,91 +0,0 @@
+-
+-//@HEADER
+-// ************************************************************************
+-// 
+-//               HPCCG: Simple Conjugate Gradient Benchmark Code
+-//                 Copyright (2006) Sandia Corporation
+-// 
+-// Under terms of Contract DE-AC04-94AL85000, there is a non-exclusive
+-// license for use of this work by or on behalf of the U.S. Government.
+-// 
+-// BSD 3-Clause License
+-// 
+-// Redistribution and use in source and binary forms, with or without
+-// modification, are permitted provided that the following conditions are met:
+-// 
+-// * Redistributions of source code must retain the above copyright notice, this
+-//   list of conditions and the following disclaimer.
+-// 
+-// * Redistributions in binary form must reproduce the above copyright notice,
+-//   this list of conditions and the following disclaimer in the documentation
+-//   and/or other materials provided with the distribution.
+-// 
+-// * Neither the name of the copyright holder nor the names of its
+-//   contributors may be used to endorse or promote products derived from
+-//   this software without specific prior written permission.
+-// 
+-// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+-// AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+-// IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+-// DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+-// FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+-// DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+-// SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+-// CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+-// OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+-// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+-// 
+-// Questions? Contact Michael A. Heroux (maherou@sandia.gov) 
+-// 
+-// ************************************************************************
+-//@HEADER
+-
+-/////////////////////////////////////////////////////////////////////////
+-
+-// Routine to compute matrix vector product y = Ax where:
+-// First call exchange_externals to get off-processor values of x
+-
+-// A - known matrix 
+-// x - known vector
+-// y - On exit contains Ax.
+-
+-/////////////////////////////////////////////////////////////////////////
+-
+-#include <iostream>
+-using std::cout;
+-using std::cerr;
+-using std::endl;
+-#include <cstdio>
+-#include <cstdlib>
+-#include <cctype>
+-#include <cassert>
+-#include <string>
+-#include <cmath>
+-#include "HPC_sparsemv.hpp"
+-
+-int HPC_sparsemv( HPC_Sparse_Matrix *A, 
+-		 const double * const x, double * const y)
+-{
+-
+-  const int nrow = (const int) A->local_nrow;
+-
+-#ifdef USING_OMP
+-#pragma omp parallel for
+-#endif
+-  for (int i=0; i< nrow; i++)
+-    {
+-      double sum = 0.0;
+-      const double * const cur_vals = 
+-     (const double * const) A->ptr_to_vals_in_row[i];
+-
+-      const int    * const cur_inds = 
+-     (const int    * const) A->ptr_to_inds_in_row[i];
+-
+-      const int cur_nnz = (const int) A->nnz_in_row[i];
+-
+-      for (int j=0; j< cur_nnz; j++)
+-          sum += cur_vals[j]*x[cur_inds[j]];
+-      y[i] = sum;
+-    }
+-  return(0);
+-}
+diff -Naur ../original_src/HPCCG/HPC_sparsemv.hpp HPCCG/HPC_sparsemv.hpp
+--- ../original_src/HPCCG/HPC_sparsemv.hpp	2021-07-27 19:36:39.152329000 -0700
++++ HPCCG/HPC_sparsemv.hpp	1969-12-31 16:00:00.000000000 -0800
+@@ -1,53 +0,0 @@
+-
+-//@HEADER
+-// ************************************************************************
+-// 
+-//               HPCCG: Simple Conjugate Gradient Benchmark Code
+-//                 Copyright (2006) Sandia Corporation
+-// 
+-// Under terms of Contract DE-AC04-94AL85000, there is a non-exclusive
+-// license for use of this work by or on behalf of the U.S. Government.
+-// 
+-// BSD 3-Clause License
+-// 
+-// Redistribution and use in source and binary forms, with or without
+-// modification, are permitted provided that the following conditions are met:
+-// 
+-// * Redistributions of source code must retain the above copyright notice, this
+-//   list of conditions and the following disclaimer.
+-// 
+-// * Redistributions in binary form must reproduce the above copyright notice,
+-//   this list of conditions and the following disclaimer in the documentation
+-//   and/or other materials provided with the distribution.
+-// 
+-// * Neither the name of the copyright holder nor the names of its
+-//   contributors may be used to endorse or promote products derived from
+-//   this software without specific prior written permission.
+-// 
+-// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+-// AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+-// IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+-// DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+-// FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+-// DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+-// SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+-// CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+-// OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+-// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+-// 
+-// Questions? Contact Michael A. Heroux (maherou@sandia.gov) 
+-// 
+-// ************************************************************************
+-//@HEADER
+-
+-#ifndef HPC_SPARSEMV_H
+-#define HPC_SPARSEMV_H
+-#include "HPC_Sparse_Matrix.hpp"
+-#ifdef USING_MPI
+-#include <mpi.h> // If this routine is compiled with -DUSING_MPI
+-                 // then include mpi.h
+-#endif
+-
+-int HPC_sparsemv( HPC_Sparse_Matrix *A, 
+-		 const double * const x, double * const y);
+-#endif
+diff -Naur ../original_src/HPCCG/LICENSE HPCCG/LICENSE
+--- ../original_src/HPCCG/LICENSE	2021-07-27 19:36:39.156303000 -0700
++++ HPCCG/LICENSE	1969-12-31 16:00:00.000000000 -0800
+@@ -1,29 +0,0 @@
+-BSD 3-Clause License
+-
+-Copyright (c) 2017, The Mantevo Performance Co-design Project
+-All rights reserved.
+-
+-Redistribution and use in source and binary forms, with or without
+-modification, are permitted provided that the following conditions are met:
+-
+-* Redistributions of source code must retain the above copyright notice, this
+-  list of conditions and the following disclaimer.
+-
+-* Redistributions in binary form must reproduce the above copyright notice,
+-  this list of conditions and the following disclaimer in the documentation
+-  and/or other materials provided with the distribution.
+-
+-* Neither the name of the copyright holder nor the names of its
+-  contributors may be used to endorse or promote products derived from
+-  this software without specific prior written permission.
+-
+-THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+-AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+-IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+-DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+-FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+-DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+-SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+-CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+-OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+-OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+diff -Naur ../original_src/HPCCG/Makefile HPCCG/Makefile
+--- ../original_src/HPCCG/Makefile	2021-07-27 19:36:39.161222000 -0700
++++ HPCCG/Makefile	1969-12-31 16:00:00.000000000 -0800
+@@ -1,138 +0,0 @@
+-
+-# @HEADER
+-# ***********************************************************************
+-#  
+-#                HPCCG: Simple Conjugate Gradient Benchmark Code
+-#                  Copyright (2006) Sandia Corporation
+-#  
+-#  Under terms of Contract DE-AC04-94AL85000, there is a non-exclusive
+-#  license for use of this work by or on behalf of the U.S. Government.
+-#  
+-#  BSD 3-Clause License
+-#  
+-#  Redistribution and use in source and binary forms, with or without
+-#  modification, are permitted provided that the following conditions are met:
+-#  
+-#  * Redistributions of source code must retain the above copyright notice, this
+-#    list of conditions and the following disclaimer.
+-#  
+-#  * Redistributions in binary form must reproduce the above copyright notice,
+-#    this list of conditions and the following disclaimer in the documentation
+-#    and/or other materials provided with the distribution.
+-#  
+-#  * Neither the name of the copyright holder nor the names of its
+-#    contributors may be used to endorse or promote products derived from
+-#    this software without specific prior written permission.
+-#  
+-#  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+-#  AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+-#  IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+-#  DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+-#  FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+-#  DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+-#  SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+-#  CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+-#  OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+-#  OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+-#  
+-#  Questions? Contact Michael A. Heroux (maherou@sandia.gov) 
+-#  
+-#  ************************************************************************
+-# @HEADER
+-
+-# Simple hand-tuned makefile.  Modify as necessary for your environment.
+-# Questions? Contact Mike Heroux (maherou@sandia.gov).
+-#
+-
+-#
+-# 0) Specify compiler and linker:
+-
+-CXX=/usr/local/bin/g++
+-LINKER=/usr/local/bin/g++
+-#CXX=mpicxx
+-#LINKER=mpicxx
+-
+-
+-# 1) Build with MPI or not?
+-#    If you want to run the program with MPI, make sure USE_MPI is set 
+-#    to -DUSING_MPI
+-
+-USE_MPI =
+-#USE_MPI = -DUSING_MPI
+-
+-
+-# 2) MPI headers:  
+-#    If you:
+-#    - Are building MPI mode (-DUSING_MPI is set above).
+-#    - Do not have the MPI headers installed in a default search directory and
+-#    - Are not using MPI compiler wrappers
+-#    Then specify the path to your MPI header file (include a -I)
+-
+-#MPI_INC = -I/usr/MPICH/SDK.gcc/include
+-
+-
+-# 3) Specify C++ compiler optimization flags (if any)
+-#    Typically some reasonably high level of optimization should be used to 
+-#    enhance performance.
+-
+-#IA32 with GCC: 
+-#CPP_OPT_FLAGS = -O3 -funroll-all-loops -malign-double
+-CPP_OPT_FLAGS = -O3 -ftree-vectorize -ftree-vectorizer-verbose=2
+-
+-#
+-# 4) MPI library:
+-#    If you:
+-#    - Are building MPI mode (-DUSING_MPI is set above).
+-#    - Do not have the MPI library installed a default search directory and
+-#    - Are not using MPI compiler wrappers for linking
+-#    Then specify the path to your MPI library (include -L and -l directives)
+-
+-#MPI_LIB = -L/usr/MPICH/SDK.gcc/lib -lmpich
+-
+-#
+-# 5) Build with OpenMP or not?
+-#    If you want to run the program with OpenMP, make sure USING_OMP is set
+-#    to -DUSING_OMP
+-
+-USE_OMP = 
+-#USE_OMP = -DUSING_OMP
+-
+-#
+-# 6) OpenMP Compiler argument
+-#    GCC and Intel compilers require -fopenmp and -openmp, resp.  Other compilers may differ.
+-
+-#OMP_FLAGS = -fopenmp
+-#OMP_FLAGS = -openmp
+-
+-#
+-# 7) System libraries: (May need to add -lg2c before -lm)
+-
+-SYS_LIB =-lm
+-
+-#
+-# 6) Specify name if executable (optional):
+-
+-TARGET = test_HPCCG
+-
+-################### Derived Quantities (no modification required) ##############
+-
+-CXXFLAGS= $(CPP_OPT_FLAGS) $(OMP_FLAGS) $(USE_OMP) $(USE_MPI) $(MPI_INC)
+-
+-LIB_PATHS= $(SYS_LIB)
+-
+-TEST_CPP = main.cpp generate_matrix.cpp read_HPC_row.cpp \
+-	  compute_residual.cpp mytimer.cpp dump_matlab_matrix.cpp \
+-          HPC_sparsemv.cpp HPCCG.cpp waxpby.cpp ddot.cpp \
+-          make_local_matrix.cpp exchange_externals.cpp \
+-          YAML_Element.cpp YAML_Doc.cpp
+-
+-TEST_OBJ          = $(TEST_CPP:.cpp=.o)
+-
+-$(TARGET): $(TEST_OBJ)
+-	$(LINKER) $(CPP_OPT_FLAGS) $(OMP_FLAGS) $(TEST_OBJ) $(LIB_PATHS) -o $(TARGET)
+-
+-test:
+-	@echo "Not implemented yet..."
+-
+-clean:
+-	@rm -f *.o  *~ $(TARGET) $(TARGET).exe test_HPCPCG 
+diff -Naur ../original_src/HPCCG/README.md HPCCG/README.md
+--- ../original_src/HPCCG/README.md	2021-07-27 19:36:39.165231000 -0700
++++ HPCCG/README.md	1969-12-31 16:00:00.000000000 -0800
+@@ -1,127 +0,0 @@
+-# HPCCG
+-High Performance Computing Conjugate Gradients:  The original Mantevo miniapp
+-------------------------------------------------
+-Description:
+-------------------------------------------------
+-HPCCG: A simple conjugate gradient benchmark code for a 3D chimney 
+-domain on an arbitrary number of processors.
+-
+-Author: Michael A. Heroux, Sandia National Laboratories (maherou@sandia.gov)
+-
+-This simple benchmark code is a self-contained piece of C++ software 
+-that generates a 27-point finite difference matrix with a user-prescribed 
+-sub-block size on each processor.
+-
+-It is implemented to be very scalable (in a weak sense).  Any 
+-reasonable parallel computer should be able to achieve excellent 
+-scaled speedup (weak scaling).  
+-
+-Kernel performance should be reasonable, but no attempts have been made
+-to provide special kernel optimizations.
+-
+-------------------------------------------------
+-Compiling the code:
+-------------------------------------------------
+-
+-There is a simple Makefile that should be easily modified for most 
+-Unix-like environments.  There are also a few Makefiles with extensions 
+-that indicate the target machine and compilers. Read the Makefile for 
+-further instructions.  If you generate a Makefile for your platform 
+-and care to share it, please send it to the author.
+-
+-By default the code compiles with MPI support and can be run on one 
+-or more processors.  If you don't have MPI, or want to compile without 
+-MPI support, you may change the definition of USE_MPI in the 
+-makefile, or use make as follows:
+-
+-`make USE_MPI=`
+-
+-To remove all output files, type:
+-
+-`make clean`
+-
+-------------------------------------------------
+-Running the code:
+-------------------------------------------------
+-
+-Usage:
+-
+-`test_HPCCG nx ny nz` (serial mode)
+-
+-`mpirun -np numproc test_HPCCG nx ny nz` (MPI mode)
+-
+-where nx, ny, nz are the number of nodes in the x, y and z 
+-dimension respectively on a each processor.
+-The global grid dimensions will be nx, ny and numproc * nz.  
+-In other words, the domains are stacked in the z direction.
+-
+-Example:
+-
+-`mpirun -np 16 ./test_HPCCG 20 30 10`
+-
+-This will construct a local problem of dimension 20-by-30-by-10 
+-whose global problem has dimension 20-by-30-by-160.
+-
+---------------------
+-Using OpenMP and MPI
+---------------------
+-
+-The values of nx, ny and nz are the local problem size.  The global size
+-is nx-by-ny-by-(nz * number of MPI ranks).
+-
+-The number of OpenMP threads is defined by the standard OpenMP mechanisms.
+-Typically this value defaults to the maximum number of reasonable threads a
+-compute node can support.  The number of threads can be modified by defining
+-the environment variable OMP_NUM_THREADS. 
+-To set the number of threads to 4:
+-
+-In tcsh or csh: `setenv OMP_NUM_THREADS 4`
+-In sh or bash: `export OMP_NUM_THREADS=4`
+-
+-You can also define it when executing the run of HPCCG:
+-
+-`ENV OMP_NUM_THREADS=4 mpirun -np 16 ./test_HPCCG 50 50 50`
+-
+----------------------------------
+-What size problem is a good size?
+----------------------------------
+-
+-I think the best way to give this guidance is to pick the problems so that 
+-the data size is over a range from 25% of total system memory up to 75%.
+-
+-If nx=ny=nz and n = nx * ny * nz, local to each MPI rank, then the number of bytes 
+-used for each rank works like this:
+-
+-Matrix storage: 336 * n bytes total (27 pt stencil), 96 * n bytes total (7 pt stencil)
+-27 * n  or 7 * n, 12 bytes per nonzero: 324 * n bytes total or 84 * n bytes total
+-n pointers for start of rows, 8 bytes per pointer: 8 * n bytes total
+-n integers for nnz per row: 4 * n bytes.
+-
+-Preconditioner: Roughly same as matrix
+-
+-Algorithm vectors: 48 * n bytes total
+-6 * n double vectors
+-
+-Total memory per MPI rank:720 * n bytes for 27 pt stencil, 240 * n bytes for 7 pt stencil.
+-
+-On an 16GB system with 4 MPI ranks running with the 27 pt stencil: 
+-- 25% of the memory would allow 1GB per MPI rank.  
+-  n would approximately be 1GB/720, so 1.39M and nx=ny=nz=100.
+-
+-- 75% of the memory would allow 3GB per MPI rank.  
+-  n would approximately be 3GB/720, so 4.17M and nx=ny=nz=161.
+-
+-Alternate usage:
+-
+-There is an alternate mode that allows specification of a data 
+-file containing a general sparse matrix.  This usage is deprecated.  
+-Please contact the author if you have need for this more general case.
+-
+-
+--------------------------------------------------
+-Changing the sparse matrix structure:
+--------------------------------------------------
+-
+-HPCCG supports two sparse matrix data structures: a 27-pt 3D grid based
+-structure and a 7-pt 3D grid based structure.  To switch between the two
+-change the bool value for use_7pt_stencil in generate_matrix.cpp.
+diff -Naur ../original_src/HPCCG/YAML_Doc.cpp HPCCG/YAML_Doc.cpp
+--- ../original_src/HPCCG/YAML_Doc.cpp	2021-07-27 19:36:39.170219000 -0700
++++ HPCCG/YAML_Doc.cpp	1969-12-31 16:00:00.000000000 -0800
+@@ -1,74 +0,0 @@
+-#include <ctime>
+-#include <cstdlib>
+-#include <ctime>
+-#include <vector>
+-#include <iostream>
+-#include <fstream>
+-#include <sstream>
+-#ifdef REDSTORM
+-#include <time.h>
+-#include <sys/stat.h>
+-#include <sys/types.h>
+-#endif
+-#include "YAML_Doc.hpp"
+-using namespace std;
+-
+-//set the microapp_name and version which will become part of the YAML doc.
+-YAML_Doc::YAML_Doc(const std::string& miniApp_Name, const std::string& miniApp_Version, const std::string& destination_Directory, const std::string& destination_FileName){
+-  miniAppName = miniApp_Name;
+-  miniAppVersion = miniApp_Version;
+-  destinationDirectory = destination_Directory;
+-  destinationFileName = destination_FileName;
+-}
+-
+-//inherits the destructor from YAML_Element
+-YAML_Doc::~YAML_Doc(void){
+-}
+-
+-/*
+-* generates YAML from the elements of the document and saves it
+-* to a file
+-*/
+-string YAML_Doc::generateYAML(){
+-  string yaml;
+-  yaml =  yaml + "Mini-Application Name: " + miniAppName + "\n";
+-  yaml =  yaml + "Mini-Application Version: " + miniAppVersion + "\n";
+-  for(size_t i=0; i<children.size(); i++){
+-    yaml = yaml + children[i]->printYAML("");
+-  }
+-  
+-  time_t rawtime;
+-  tm * ptm;
+-  time ( &rawtime );
+-  ptm = localtime(&rawtime);
+-  char sdate[25];
+-  //use tm_mon+1 because tm_mon is 0 .. 11 instead of 1 .. 12
+-  sprintf (sdate,"%04d_%02d_%02d__%02d_%02d_%02d",ptm->tm_year + 1900, ptm->tm_mon+1,
+-    ptm->tm_mday, ptm->tm_hour, ptm->tm_min,ptm->tm_sec);
+-
+-  string filename;
+-  if (destinationFileName=="") 
+-    filename = miniAppName + "-" + miniAppVersion + "_";
+-  else 
+-    filename = destinationFileName;
+-  filename = filename + string(sdate) + ".yaml";
+-  if (destinationDirectory!="" && destinationDirectory!=".") {
+-    string mkdir_cmd = "mkdir " + destinationDirectory;
+-#ifdef REDSTORM
+-    mkdir(destinationDirectory.c_str(),0755);
+-#else
+-    system(mkdir_cmd.c_str());
+-#endif
+-    filename = destinationDirectory + "/" + destinationFileName;
+-  }
+-  else 
+-    filename = "./" + filename;
+-
+-  ofstream myfile;
+-  myfile.open(filename.c_str());
+-  myfile << yaml;
+-  myfile.close();
+-  return yaml;
+-}
+-
+-
+diff -Naur ../original_src/HPCCG/YAML_Doc.hpp HPCCG/YAML_Doc.hpp
+--- ../original_src/HPCCG/YAML_Doc.hpp	2021-07-27 19:36:39.174267000 -0700
++++ HPCCG/YAML_Doc.hpp	1969-12-31 16:00:00.000000000 -0800
+@@ -1,135 +0,0 @@
+-
+-//@HEADER
+-// ************************************************************************
+-// 
+-//               HPCCG: Simple Conjugate Gradient Benchmark Code
+-//                 Copyright (2006) Sandia Corporation
+-// 
+-// Under terms of Contract DE-AC04-94AL85000, there is a non-exclusive
+-// license for use of this work by or on behalf of the U.S. Government.
+-// 
+-// BSD 3-Clause License
+-// 
+-// Redistribution and use in source and binary forms, with or without
+-// modification, are permitted provided that the following conditions are met:
+-// 
+-// * Redistributions of source code must retain the above copyright notice, this
+-//   list of conditions and the following disclaimer.
+-// 
+-// * Redistributions in binary form must reproduce the above copyright notice,
+-//   this list of conditions and the following disclaimer in the documentation
+-//   and/or other materials provided with the distribution.
+-// 
+-// * Neither the name of the copyright holder nor the names of its
+-//   contributors may be used to endorse or promote products derived from
+-//   this software without specific prior written permission.
+-// 
+-// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+-// AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+-// IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+-// DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+-// FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+-// DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+-// SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+-// CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+-// OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+-// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+-// 
+-// Questions? Contact Michael A. Heroux (maherou@sandia.gov) 
+-// 
+-// ************************************************************************
+-//@HEADER
+-// Changelog
+-//
+-// Version 0.1
+-// - Initial version.
+-//
+-/////////////////////////////////////////////////////////////////////////
+-
+-#ifndef YAML_DOC_H
+-#define YAML_DOC_H
+-#include <string>
+-#include <vector>
+-#include "YAML_Element.hpp"
+-
+-//! The Mantevo YAML_Doc class for the uniform collecting and reporting of performance data for mini-applications
+-
+-/*!
+-
+-The YAML_Doc class works in conjuction with the YAML_Element class to facilitate easy collecting and reporting of YAML-formatted
+-data that can be then registered with the Mantevo results collection website.
+-
+-\code
+-
+-//EXAMPLE CODE FOR GENERATING YAML
+-
+-  YAML_Doc doc("hpccg","1.0");
+-  doc.add("final_residual",1.4523e-13);
+-  doc.add("time","4.893"); 
+- 
+-//note: the following line will remove the data (4.890) associated with "time"
+-  doc.get("time")->add("total",4.243);
+-
+-//note:  the following line will likewise remove the data (1.243) associated with "time"
+-  doc.get("time")->get("total")->add("time",2.457);
+-  doc.get("time")->get("total")->add("flops",4.88e5);
+-  doc.get("time")->add("ddot",1.243);
+-  doc.get("time")->add("sparsemv","");
+-  doc.get("time")->get("sparsemv")->add("time",0.3445);
+-  doc.get("time")->get("sparsemv")->add("overhead","");
+-  doc.get("time")->get("sparsemv")->get("overhead")->add("time",0.0123);
+-  doc.get("time")->get("sparsemv")->get("overhead")->add("percentage",0.034);
+-  cout << doc.generateYAML() << endl; 
+-  return 0;
+-
+-\endcode
+-
+-Below is the output generated by the above code:
+-
+-\verbatim
+-
+-final_residual: 1.4523e-13
+-time: 
+-  total:
+-    time: 2.457
+-    flops: 4.88e5
+-  ddot: 1.243
+-  sparsemv:
+-    time: 0.3445
+-    overhead:
+-      time: 0.0123
+-      percentage: 0.034
+-
+-\endverbatim
+-
+-\note {No value is allowed to be attached to a key that has children.  If children are added to a key, the value is simply set to "".}
+-
+-*/
+-class YAML_Doc: public YAML_Element {
+-  public:
+-  //! Constructor: accepts mini-application name and version as strings, optionally accepts directory and file name for printing results.
+-  /*!
+-    The sole constructor for this class accepts and name and version number for the mini-application as well as optional directory 
+-    and file name information for results that are generated by the generateYAML() method.
+-    \param miniApp_Name (in) string containing name of the mini-application
+-    \param miniApp_Version (in) string containing the version of the mini-application
+-    \param destination_Directory (in, optional) path of diretory where results file will be stored, relative to current working directory. 
+-           If this value is not supplied, the results file will be stored in the current working directory.  If the directory does not exist
+-	   it will be created.
+-    \param destination_FileName (in, optional) root name of the results file.  A suffix of ".yaml" will be automatically appended.  If no
+-           file name is specified the filename will be constructed by concatenating the miniAppName + miniAppVersion + ".yaml" strings.
+-  */
+-  YAML_Doc(const std::string& miniApp_Name, const std::string& miniApp_Version, const std::string& destination_Directory = "", const std::string& destination_FileName = "");
+-  //! Destructor
+-  ~YAML_Doc();
+-  //! Generate YAML results to standard out and to a file using specified directory and filename, using current directory and miniAppName + miniAppVersion + ".yaml" by default
+-  std::string generateYAML();
+-
+-protected:
+-  std::string miniAppName;
+-  std::string miniAppVersion;
+-  std::string destinationDirectory;
+-  std::string destinationFileName;
+-};
+-#endif /* YAML_DOC_H */
+-
+diff -Naur ../original_src/HPCCG/YAML_Element.cpp HPCCG/YAML_Element.cpp
+--- ../original_src/HPCCG/YAML_Element.cpp	2021-07-27 19:36:39.178248000 -0700
++++ HPCCG/YAML_Element.cpp	1969-12-31 16:00:00.000000000 -0800
+@@ -1,120 +0,0 @@
+-#include <vector>
+-#include <iostream>
+-#include <fstream>
+-#include <sstream>
+-#include "YAML_Element.hpp"
+-using namespace std;
+-YAML_Element::YAML_Element(const std::string& key_arg, const std::string& value_arg){
+-  key = key_arg;
+-  value = value_arg;
+-}
+-
+-YAML_Element::~YAML_Element(){
+-  for (size_t i=0; i<children.size(); i++) {
+-    delete children[i];
+-  }
+-  children.clear();
+-}
+-
+-/*
+-* Add an element to the vector
+-* QUESTION: if an element is not added because the key already exists,
+-* will this lead to memory leakage?
+-*/
+-YAML_Element* YAML_Element::add(const std::string& key_arg, double value_arg) {
+-  this->value = "";
+-  string converted_value = convert_double_to_string(value_arg);
+-  YAML_Element* element = new YAML_Element(key_arg,converted_value);
+-  children.push_back(element);
+-  return element;
+-}
+-
+-YAML_Element* YAML_Element::add(const std::string& key_arg, int value_arg) {
+-  this->value = "";
+-  string converted_value = convert_int_to_string(value_arg);
+-  YAML_Element* element = new YAML_Element(key_arg,converted_value);
+-  children.push_back(element);
+-  return element;
+-}
+-
+-#ifndef MINIFE_NO_LONG_LONG
+-
+-YAML_Element* YAML_Element::add(const std::string& key_arg, long long value_arg) {
+-  this->value = "";
+-  string converted_value = convert_long_long_to_string(value_arg);
+-  YAML_Element* element = new YAML_Element(key_arg,converted_value);
+-  children.push_back(element);
+-  return element;
+-}
+-
+-#endif
+-
+-YAML_Element* YAML_Element::add(const std::string& key_arg, size_t value_arg) {
+-  this->value = "";
+-  string converted_value = convert_size_t_to_string(value_arg);
+-  YAML_Element* element = new YAML_Element(key_arg,converted_value);
+-  children.push_back(element);
+-  return element;
+-}
+-
+-YAML_Element* YAML_Element::add(const std::string& key_arg, const std::string& value_arg) {
+-  this->value = "";
+-  YAML_Element* element = new YAML_Element(key_arg, value_arg);
+-  children.push_back(element);
+-  return element;
+-}
+-
+-/*
+-* returns pointer to the YAML_Element for the given key.
+-* I, cam, believe an exception should be thrown if there is no
+-* element in the vector for the specified key
+-*/
+-YAML_Element* YAML_Element::get(const std::string& key_arg) {
+-  for (size_t i=0; i<children.size(); i++) {
+-    if(children[i]->getKey() == key_arg){
+-      return children[i];
+-    }
+-  }
+-  return 0;
+-}
+-
+-/*
+-* prints a line of a YAML document.  Correct YAML depends on
+-* correct spacing; the parameter space should be the proper
+-* amount of space for the parent element
+-*/
+-string YAML_Element::printYAML(std::string space){
+-  string yaml_line = space + key + ": " + value + "\n";
+-  for(int i=0; i<2; i++) space = space + " ";
+-  for(size_t i=0; i<children.size(); i++){
+-    yaml_line = yaml_line + children[i]->printYAML(space);
+-  }
+-  return yaml_line;
+-}
+-
+-string YAML_Element::convert_double_to_string(double value_arg){
+-  stringstream strm;
+-  strm << value_arg;
+-  return strm.str();
+-}
+-string YAML_Element::convert_int_to_string(int value_arg){
+-  stringstream strm;
+-  strm << value_arg;
+-  return strm.str();
+-}
+-
+-#ifndef MINIFE_NO_LONG_LONG
+-
+-string YAML_Element::convert_long_long_to_string(long long value_arg){
+-  stringstream strm;
+-  strm << value_arg;
+-  return strm.str();
+-}
+-
+-#endif
+-
+-string YAML_Element::convert_size_t_to_string(size_t value_arg){
+-  stringstream strm;
+-  strm << value_arg;
+-  return strm.str();
+-}
+diff -Naur ../original_src/HPCCG/YAML_Element.hpp HPCCG/YAML_Element.hpp
+--- ../original_src/HPCCG/YAML_Element.hpp	2021-07-27 19:36:39.182240000 -0700
++++ HPCCG/YAML_Element.hpp	1969-12-31 16:00:00.000000000 -0800
+@@ -1,99 +0,0 @@
+-
+-//@HEADER
+-// ************************************************************************
+-// 
+-//               HPCCG: Simple Conjugate Gradient Benchmark Code
+-//                 Copyright (2006) Sandia Corporation
+-// 
+-// Under terms of Contract DE-AC04-94AL85000, there is a non-exclusive
+-// license for use of this work by or on behalf of the U.S. Government.
+-// 
+-// BSD 3-Clause License
+-// 
+-// Redistribution and use in source and binary forms, with or without
+-// modification, are permitted provided that the following conditions are met:
+-// 
+-// * Redistributions of source code must retain the above copyright notice, this
+-//   list of conditions and the following disclaimer.
+-// 
+-// * Redistributions in binary form must reproduce the above copyright notice,
+-//   this list of conditions and the following disclaimer in the documentation
+-//   and/or other materials provided with the distribution.
+-// 
+-// * Neither the name of the copyright holder nor the names of its
+-//   contributors may be used to endorse or promote products derived from
+-//   this software without specific prior written permission.
+-// 
+-// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+-// AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+-// IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+-// DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+-// FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+-// DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+-// SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+-// CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+-// OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+-// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+-// 
+-// Questions? Contact Michael A. Heroux (maherou@sandia.gov) 
+-// 
+-// ************************************************************************
+-//@HEADER
+-// Changelog
+-//
+-// Version 0.1
+-// - Initial version.
+-//
+-/////////////////////////////////////////////////////////////////////////
+-
+-#ifndef YAML_ELEMENT_H
+-#define YAML_ELEMENT_H
+-#include <string>
+-#include <vector>
+-//! The Mantevo YAML_Element class for registering key-value pairs of performance data
+-
+-/*!
+-  Mantevo mini-applications generate a collection of performance data for each run of the executable.  YAML_Element, and
+-  the related YAML_Doc class, provide a uniform facility for gathering and reporting this data using the YAML text format.
+-*/
+-class YAML_Element {
+-  public:
+-
+-  //! Default constructor.
+-  YAML_Element (){key="";value="";}
+-  //! Construct with known key-value pair
+-  YAML_Element (const std::string& key_arg, const std::string& value_arg);
+-  //! Destructor
+-  ~YAML_Element ();
+-  //! Key accessor method
+-  std::string getKey(){return key;}
+-  //! Add a child element to an element list associated with this element, value of type double
+-  YAML_Element* add(const std::string& key_arg, double value_arg);
+-  //! Add a child element to an element list associated with this element, value of type int
+-  YAML_Element* add(const std::string& key_arg, int value_arg);
+-#ifndef MINIFE_NO_LONG_LONG
+-  //! Add a child element to an element list associated with this element, value of type long long
+-  YAML_Element* add(const std::string& key_arg, long long value_arg);
+-#endif
+-  //! Add a child element to an element list associated with this element, value of type size_t
+-  YAML_Element* add(const std::string& key_arg, size_t value_arg);
+-  //! Add a child element to an element list associated with this element, value of type string
+-  YAML_Element* add(const std::string& key_arg, const std::string& value_arg);
+-  //! get the element in the list with the given key
+-  YAML_Element* get(const std::string& key_arg);
+-  std::string printYAML(std::string space);
+-  
+-protected:
+-  std::string key;
+-  std::string value;
+-  std::vector<YAML_Element*> children;
+-
+-private:
+-  std::string convert_double_to_string(double value_arg);
+-  std::string convert_int_to_string(int value_arg);
+-#ifndef MINIFE_NO_LONG_LONG
+-  std::string convert_long_long_to_string(long long value_arg);
+-#endif
+-  std::string convert_size_t_to_string(size_t value_arg);
+-};
+-#endif /* YAML_ELEMENT_H */
+diff -Naur ../original_src/HPCCG/benchDescr.yaml HPCCG/benchDescr.yaml
+--- ../original_src/HPCCG/benchDescr.yaml	1969-12-31 16:00:00.000000000 -0800
++++ HPCCG/benchDescr.yaml	2021-07-27 20:50:53.078955000 -0700
+@@ -0,0 +1,6 @@
++HPCCG:
++    input: ["64_64_64"]
++    cmd: '64 64 64 <output>'
++    measure: 'RUN_TIME:(\d+\.\d+)'
++    metric: 'MAPE'
++    quality_pattern: 'OUTPUT_QUALITY:([0-9]*\.?[0-9]+([eE][-+]?[0-9]+)?)'
+diff -Naur ../original_src/HPCCG/compute_residual.cpp HPCCG/compute_residual.cpp
+--- ../original_src/HPCCG/compute_residual.cpp	2021-07-27 19:36:39.186245000 -0700
++++ HPCCG/compute_residual.cpp	1969-12-31 16:00:00.000000000 -0800
+@@ -1,81 +0,0 @@
+-
+-//@HEADER
+-// ************************************************************************
+-// 
+-//               HPCCG: Simple Conjugate Gradient Benchmark Code
+-//                 Copyright (2006) Sandia Corporation
+-// 
+-// Under terms of Contract DE-AC04-94AL85000, there is a non-exclusive
+-// license for use of this work by or on behalf of the U.S. Government.
+-// 
+-// BSD 3-Clause License
+-// 
+-// Redistribution and use in source and binary forms, with or without
+-// modification, are permitted provided that the following conditions are met:
+-// 
+-// * Redistributions of source code must retain the above copyright notice, this
+-//   list of conditions and the following disclaimer.
+-// 
+-// * Redistributions in binary form must reproduce the above copyright notice,
+-//   this list of conditions and the following disclaimer in the documentation
+-//   and/or other materials provided with the distribution.
+-// 
+-// * Neither the name of the copyright holder nor the names of its
+-//   contributors may be used to endorse or promote products derived from
+-//   this software without specific prior written permission.
+-// 
+-// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+-// AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+-// IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+-// DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+-// FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+-// DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+-// SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+-// CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+-// OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+-// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+-// 
+-// Questions? Contact Michael A. Heroux (maherou@sandia.gov) 
+-// 
+-// ************************************************************************
+-//@HEADER
+-
+-/////////////////////////////////////////////////////////////////////////
+-
+-// Routine to compute the 1-norm difference between two vectors where:
+-
+-// n - number of vector elements (on this processor)
+-
+-// v1, v2 - input vectors
+-
+-// residual - pointer to scalar value, on exit will contain result.
+-
+-/////////////////////////////////////////////////////////////////////////
+-
+-#include <cmath>  // needed for fabs
+-using std::fabs;
+-#include "compute_residual.hpp"
+-
+-int compute_residual(const int n, const double * const v1, 
+-		     const double * const v2, double * const residual)
+-{
+-  double local_residual = 0.0;
+-  
+-  for (int i=0; i<n; i++) {
+-    double diff = fabs(v1[i] - v2[i]);
+-    if (diff > local_residual) local_residual = diff;
+-  }
+-#ifdef USING_MPI
+-  // Use MPI's reduce function to collect all partial sums
+-
+-  double global_residual = 0;
+-  
+-  MPI_Allreduce(&local_residual, &global_residual, 1, MPI_DOUBLE, MPI_MAX,
+-                MPI_COMM_WORLD);
+-  *residual = global_residual;
+-#else
+-  *residual = local_residual;
+-#endif
+-
+-  return(0);
+-}
+diff -Naur ../original_src/HPCCG/compute_residual.hpp HPCCG/compute_residual.hpp
+--- ../original_src/HPCCG/compute_residual.hpp	2021-07-27 19:36:39.190257000 -0700
++++ HPCCG/compute_residual.hpp	1969-12-31 16:00:00.000000000 -0800
+@@ -1,52 +0,0 @@
+-
+-//@HEADER
+-// ************************************************************************
+-// 
+-//               HPCCG: Simple Conjugate Gradient Benchmark Code
+-//                 Copyright (2006) Sandia Corporation
+-// 
+-// Under terms of Contract DE-AC04-94AL85000, there is a non-exclusive
+-// license for use of this work by or on behalf of the U.S. Government.
+-// 
+-// BSD 3-Clause License
+-// 
+-// Redistribution and use in source and binary forms, with or without
+-// modification, are permitted provided that the following conditions are met:
+-// 
+-// * Redistributions of source code must retain the above copyright notice, this
+-//   list of conditions and the following disclaimer.
+-// 
+-// * Redistributions in binary form must reproduce the above copyright notice,
+-//   this list of conditions and the following disclaimer in the documentation
+-//   and/or other materials provided with the distribution.
+-// 
+-// * Neither the name of the copyright holder nor the names of its
+-//   contributors may be used to endorse or promote products derived from
+-//   this software without specific prior written permission.
+-// 
+-// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+-// AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+-// IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+-// DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+-// FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+-// DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+-// SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+-// CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+-// OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+-// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+-// 
+-// Questions? Contact Michael A. Heroux (maherou@sandia.gov) 
+-// 
+-// ************************************************************************
+-//@HEADER
+-
+-#ifndef COMPUTE_RESIDUAL_H
+-#define COMPUTE_RESIDUAL_H
+-#ifdef USING_MPI
+-#include <mpi.h> // If this routine is compiled with -DUSING_MPI
+-                 // then include mpi.h
+-#endif
+-
+-int compute_residual(const int n, const double * const v1, 
+-		     const double * const v2, double * const residual);
+-#endif
+diff -Naur ../original_src/HPCCG/ddot.cpp HPCCG/ddot.cpp
+--- ../original_src/HPCCG/ddot.cpp	2021-07-27 19:36:39.195242000 -0700
++++ HPCCG/ddot.cpp	1969-12-31 16:00:00.000000000 -0800
+@@ -1,84 +0,0 @@
+-
+-//@HEADER
+-// ************************************************************************
+-// 
+-//               HPCCG: Simple Conjugate Gradient Benchmark Code
+-//                 Copyright (2006) Sandia Corporation
+-// 
+-// Under terms of Contract DE-AC04-94AL85000, there is a non-exclusive
+-// license for use of this work by or on behalf of the U.S. Government.
+-// 
+-// BSD 3-Clause License
+-// 
+-// Redistribution and use in source and binary forms, with or without
+-// modification, are permitted provided that the following conditions are met:
+-// 
+-// * Redistributions of source code must retain the above copyright notice, this
+-//   list of conditions and the following disclaimer.
+-// 
+-// * Redistributions in binary form must reproduce the above copyright notice,
+-//   this list of conditions and the following disclaimer in the documentation
+-//   and/or other materials provided with the distribution.
+-// 
+-// * Neither the name of the copyright holder nor the names of its
+-//   contributors may be used to endorse or promote products derived from
+-//   this software without specific prior written permission.
+-// 
+-// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+-// AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+-// IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+-// DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+-// FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+-// DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+-// SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+-// CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+-// OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+-// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+-// 
+-// Questions? Contact Michael A. Heroux (maherou@sandia.gov) 
+-// 
+-// ************************************************************************
+-//@HEADER
+-
+-/////////////////////////////////////////////////////////////////////////
+-
+-// Routine to compute the dot product of two vectors where:
+-
+-// n - number of vector elements (on this processor)
+-
+-// x, y - input vectors
+-
+-// residual - pointer to scalar value, on exit will contain result.
+-
+-/////////////////////////////////////////////////////////////////////////
+-
+-#include "ddot.hpp"
+-int ddot (const int n, const double * const x, const double * const y, 
+-	  double * const result, double & time_allreduce)
+-{  
+-  double local_result = 0.0;
+-  if (y==x)
+-#ifdef USING_OMP
+-#pragma omp parallel for reduction (+:local_result)
+-#endif
+-    for (int i=0; i<n; i++) local_result += x[i]*x[i];
+-  else
+-#ifdef USING_OMP
+-#pragma omp parallel for reduction (+:local_result)
+-#endif
+-    for (int i=0; i<n; i++) local_result += x[i]*y[i];
+-
+-#ifdef USING_MPI
+-  // Use MPI's reduce function to collect all partial sums
+-  double t0 = mytimer();
+-  double global_result = 0.0;
+-  MPI_Allreduce(&local_result, &global_result, 1, MPI_DOUBLE, MPI_SUM, 
+-                MPI_COMM_WORLD);
+-  *result = global_result;
+-  time_allreduce += mytimer() - t0;
+-#else
+-  *result = local_result;
+-#endif
+-
+-  return(0);
+-}
+diff -Naur ../original_src/HPCCG/ddot.hpp HPCCG/ddot.hpp
+--- ../original_src/HPCCG/ddot.hpp	2021-07-27 19:36:39.199232000 -0700
++++ HPCCG/ddot.hpp	1969-12-31 16:00:00.000000000 -0800
+@@ -1,53 +0,0 @@
+-
+-//@HEADER
+-// ************************************************************************
+-// 
+-//               HPCCG: Simple Conjugate Gradient Benchmark Code
+-//                 Copyright (2006) Sandia Corporation
+-// 
+-// Under terms of Contract DE-AC04-94AL85000, there is a non-exclusive
+-// license for use of this work by or on behalf of the U.S. Government.
+-// 
+-// BSD 3-Clause License
+-// 
+-// Redistribution and use in source and binary forms, with or without
+-// modification, are permitted provided that the following conditions are met:
+-// 
+-// * Redistributions of source code must retain the above copyright notice, this
+-//   list of conditions and the following disclaimer.
+-// 
+-// * Redistributions in binary form must reproduce the above copyright notice,
+-//   this list of conditions and the following disclaimer in the documentation
+-//   and/or other materials provided with the distribution.
+-// 
+-// * Neither the name of the copyright holder nor the names of its
+-//   contributors may be used to endorse or promote products derived from
+-//   this software without specific prior written permission.
+-// 
+-// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+-// AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+-// IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+-// DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+-// FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+-// DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+-// SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+-// CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+-// OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+-// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+-// 
+-// Questions? Contact Michael A. Heroux (maherou@sandia.gov) 
+-// 
+-// ************************************************************************
+-//@HEADER
+-#ifndef DDOT_H
+-#define DDOT_H
+-#ifdef USING_MPI
+-#include <mpi.h>
+-#include "mytimer.hpp"
+-#endif
+-
+-
+-
+-int ddot (const int n, const double * const x, const double * const y, 
+-	  double * const result, double & time_allreduce);
+-#endif
+diff -Naur ../original_src/HPCCG/dump_matlab_matrix.cpp HPCCG/dump_matlab_matrix.cpp
+--- ../original_src/HPCCG/dump_matlab_matrix.cpp	2021-07-27 19:36:39.204236000 -0700
++++ HPCCG/dump_matlab_matrix.cpp	1969-12-31 16:00:00.000000000 -0800
+@@ -1,82 +0,0 @@
+-
+-//@HEADER
+-// ************************************************************************
+-// 
+-//               HPCCG: Simple Conjugate Gradient Benchmark Code
+-//                 Copyright (2006) Sandia Corporation
+-// 
+-// Under terms of Contract DE-AC04-94AL85000, there is a non-exclusive
+-// license for use of this work by or on behalf of the U.S. Government.
+-// 
+-// BSD 3-Clause License
+-// 
+-// Redistribution and use in source and binary forms, with or without
+-// modification, are permitted provided that the following conditions are met:
+-// 
+-// * Redistributions of source code must retain the above copyright notice, this
+-//   list of conditions and the following disclaimer.
+-// 
+-// * Redistributions in binary form must reproduce the above copyright notice,
+-//   this list of conditions and the following disclaimer in the documentation
+-//   and/or other materials provided with the distribution.
+-// 
+-// * Neither the name of the copyright holder nor the names of its
+-//   contributors may be used to endorse or promote products derived from
+-//   this software without specific prior written permission.
+-// 
+-// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+-// AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+-// IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+-// DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+-// FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+-// DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+-// SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+-// CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+-// OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+-// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+-// 
+-// Questions? Contact Michael A. Heroux (maherou@sandia.gov) 
+-// 
+-// ************************************************************************
+-//@HEADER
+-/////////////////////////////////////////////////////////////////////////
+-
+-// Routine to dump matrix in row, col, val format for analysis with Matlab
+-// Writes to mat.dat
+-// NOTE:  THIS CODE ONLY WORKS ON SINGLE PROCESSOR RUNS
+-// Read into matlab using:
+-//   load mat.dat
+-//   A=spconvert(mat);
+-
+-// A - known matrix 
+-
+-/////////////////////////////////////////////////////////////////////////
+-
+-#include <cstdio>
+-#include "dump_matlab_matrix.hpp"
+-
+-int dump_matlab_matrix( HPC_Sparse_Matrix *A, int rank) {
+-  const int nrow = A->local_nrow;
+-  int start_row = nrow*rank; // Each processor gets a section of a chimney stack domain
+-
+-  FILE * handle = 0;
+-  if (rank==0) 
+-    handle = fopen("mat0.dat", "w");
+-  else if (rank==1)
+-    handle = fopen("mat1.dat", "w");
+-  else if (rank==2)
+-    handle = fopen("mat2.dat", "w");
+-  else if (rank==3)
+-    handle = fopen("mat3.dat", "w");
+-  else return(0);
+-
+-  for (int i=0; i< nrow; i++) {
+-      const double * const cur_vals = A->ptr_to_vals_in_row[i];
+-      const int    * const cur_inds = A->ptr_to_inds_in_row[i];
+-      const int cur_nnz = A->nnz_in_row[i];
+-      for (int j=0; j< cur_nnz; j++) fprintf(handle, " %d %d %22.16e\n",start_row+i+1,cur_inds[j]+1,cur_vals[j]);
+-    }
+-
+-  fclose(handle);
+-  return(0);
+-}
+diff -Naur ../original_src/HPCCG/dump_matlab_matrix.hpp HPCCG/dump_matlab_matrix.hpp
+--- ../original_src/HPCCG/dump_matlab_matrix.hpp	2021-07-27 19:36:39.208257000 -0700
++++ HPCCG/dump_matlab_matrix.hpp	1969-12-31 16:00:00.000000000 -0800
+@@ -1,48 +0,0 @@
+-
+-//@HEADER
+-// ************************************************************************
+-// 
+-//               HPCCG: Simple Conjugate Gradient Benchmark Code
+-//                 Copyright (2006) Sandia Corporation
+-// 
+-// Under terms of Contract DE-AC04-94AL85000, there is a non-exclusive
+-// license for use of this work by or on behalf of the U.S. Government.
+-// 
+-// BSD 3-Clause License
+-// 
+-// Redistribution and use in source and binary forms, with or without
+-// modification, are permitted provided that the following conditions are met:
+-// 
+-// * Redistributions of source code must retain the above copyright notice, this
+-//   list of conditions and the following disclaimer.
+-// 
+-// * Redistributions in binary form must reproduce the above copyright notice,
+-//   this list of conditions and the following disclaimer in the documentation
+-//   and/or other materials provided with the distribution.
+-// 
+-// * Neither the name of the copyright holder nor the names of its
+-//   contributors may be used to endorse or promote products derived from
+-//   this software without specific prior written permission.
+-// 
+-// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+-// AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+-// IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+-// DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+-// FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+-// DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+-// SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+-// CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+-// OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+-// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+-// 
+-// Questions? Contact Michael A. Heroux (maherou@sandia.gov) 
+-// 
+-// ************************************************************************
+-//@HEADER
+-
+-#ifndef DUMP_MATLAB_MATRIX_H
+-#define DUMP_MATLAB_MATRIX_H
+-#include "HPC_Sparse_Matrix.hpp"
+-
+-int dump_matlab_matrix( HPC_Sparse_Matrix *A, int rank);
+-#endif
+diff -Naur ../original_src/HPCCG/exchange_externals.cpp HPCCG/exchange_externals.cpp
+--- ../original_src/HPCCG/exchange_externals.cpp	2021-07-27 19:36:39.212226000 -0700
++++ HPCCG/exchange_externals.cpp	1969-12-31 16:00:00.000000000 -0800
+@@ -1,132 +0,0 @@
+-
+-//@HEADER
+-// ************************************************************************
+-// 
+-//               HPCCG: Simple Conjugate Gradient Benchmark Code
+-//                 Copyright (2006) Sandia Corporation
+-// 
+-// Under terms of Contract DE-AC04-94AL85000, there is a non-exclusive
+-// license for use of this work by or on behalf of the U.S. Government.
+-// 
+-// BSD 3-Clause License
+-// 
+-// Redistribution and use in source and binary forms, with or without
+-// modification, are permitted provided that the following conditions are met:
+-// 
+-// * Redistributions of source code must retain the above copyright notice, this
+-//   list of conditions and the following disclaimer.
+-// 
+-// * Redistributions in binary form must reproduce the above copyright notice,
+-//   this list of conditions and the following disclaimer in the documentation
+-//   and/or other materials provided with the distribution.
+-// 
+-// * Neither the name of the copyright holder nor the names of its
+-//   contributors may be used to endorse or promote products derived from
+-//   this software without specific prior written permission.
+-// 
+-// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+-// AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+-// IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+-// DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+-// FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+-// DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+-// SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+-// CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+-// OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+-// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+-// 
+-// Questions? Contact Michael A. Heroux (maherou@sandia.gov) 
+-// 
+-// ************************************************************************
+-//@HEADER
+-
+-#ifdef USING_MPI  // Compile this routine only if running in parallel
+-#include <iostream>
+-using std::cerr;
+-using std::endl;
+-#include <cstdlib>
+-#include <cstdio>
+-#include "exchange_externals.hpp"
+-#undef DEBUG
+-void exchange_externals(HPC_Sparse_Matrix * A, const double *x)
+-{
+-  int i, j, k;
+-  int num_external = 0;
+-
+-  // Extract Matrix pieces
+-
+-  int local_nrow = A->local_nrow;
+-  int num_neighbors = A->num_send_neighbors;
+-  int * recv_length = A->recv_length;
+-  int * send_length = A->send_length;
+-  int * neighbors = A->neighbors;
+-  double * send_buffer = A->send_buffer;
+-  int total_to_be_sent = A->total_to_be_sent;
+-  int * elements_to_send = A->elements_to_send;
+-  
+-  int size, rank; // Number of MPI processes, My process ID
+-  MPI_Comm_size(MPI_COMM_WORLD, &size);
+-  MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+-
+-  //
+-  //  first post receives, these are immediate receives
+-  //  Do not wait for result to come, will do that at the
+-  //  wait call below.
+-  //
+-
+-  int MPI_MY_TAG = 99;  
+-
+-  MPI_Request * request = new MPI_Request[num_neighbors];
+-
+-  //
+-  // Externals are at end of locals
+-  //
+-  double *x_external = (double *) x + local_nrow;
+-
+-  // Post receives first 
+-  for (i = 0; i < num_neighbors; i++) 
+-    {
+-      int n_recv = recv_length[i];
+-      MPI_Irecv(x_external, n_recv, MPI_DOUBLE, neighbors[i], MPI_MY_TAG, 
+-		MPI_COMM_WORLD, request+i);
+-      x_external += n_recv;
+-    }
+-
+-
+-  //
+-  // Fill up send buffer
+-  //
+-
+-  for (i=0; i<total_to_be_sent; i++) send_buffer[i] = x[elements_to_send[i]];
+-
+-  //
+-  // Send to each neighbor
+-  //
+-
+-  for (i = 0; i < num_neighbors; i++) 
+-    {
+-      int n_send = send_length[i];
+-      MPI_Send(send_buffer, n_send, MPI_DOUBLE, neighbors[i], MPI_MY_TAG, 
+-	       MPI_COMM_WORLD);
+-      send_buffer += n_send;
+-    }
+-
+-  //
+-  // Complete the reads issued above
+-  //
+-
+-  MPI_Status status;
+-  for (i = 0; i < num_neighbors; i++)
+-    {
+-      if ( MPI_Wait(request+i, &status) )
+-	{
+-	  cerr << "MPI_Wait error\n"<<endl;
+-	  exit(-1);
+-	}
+-    }
+-
+-  delete [] request;
+-
+-  return;
+-}
+-#endif // USING_MPI
+diff -Naur ../original_src/HPCCG/exchange_externals.hpp HPCCG/exchange_externals.hpp
+--- ../original_src/HPCCG/exchange_externals.hpp	2021-07-27 19:36:39.216278000 -0700
++++ HPCCG/exchange_externals.hpp	1969-12-31 16:00:00.000000000 -0800
+@@ -1,50 +0,0 @@
+-
+-//@HEADER
+-// ************************************************************************
+-// 
+-//               HPCCG: Simple Conjugate Gradient Benchmark Code
+-//                 Copyright (2006) Sandia Corporation
+-// 
+-// Under terms of Contract DE-AC04-94AL85000, there is a non-exclusive
+-// license for use of this work by or on behalf of the U.S. Government.
+-// 
+-// BSD 3-Clause License
+-// 
+-// Redistribution and use in source and binary forms, with or without
+-// modification, are permitted provided that the following conditions are met:
+-// 
+-// * Redistributions of source code must retain the above copyright notice, this
+-//   list of conditions and the following disclaimer.
+-// 
+-// * Redistributions in binary form must reproduce the above copyright notice,
+-//   this list of conditions and the following disclaimer in the documentation
+-//   and/or other materials provided with the distribution.
+-// 
+-// * Neither the name of the copyright holder nor the names of its
+-//   contributors may be used to endorse or promote products derived from
+-//   this software without specific prior written permission.
+-// 
+-// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+-// AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+-// IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+-// DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+-// FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+-// DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+-// SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+-// CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+-// OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+-// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+-// 
+-// Questions? Contact Michael A. Heroux (maherou@sandia.gov) 
+-// 
+-// ************************************************************************
+-//@HEADER
+-
+-#ifndef EXCHANGE_EXTERNALS_H
+-#define EXCHANGE_EXTERNAL_H
+-#ifdef USING_MPI
+-#include <mpi.h>
+-#endif
+-#include "HPC_Sparse_Matrix.hpp"
+-void exchange_externals(HPC_Sparse_Matrix *A, const double *x);
+-#endif
+diff -Naur ../original_src/HPCCG/generate_matrix.cpp HPCCG/generate_matrix.cpp
+--- ../original_src/HPCCG/generate_matrix.cpp	2021-07-27 19:36:39.220276000 -0700
++++ HPCCG/generate_matrix.cpp	1969-12-31 16:00:00.000000000 -0800
+@@ -1,171 +0,0 @@
+-
+-//@HEADER
+-// ************************************************************************
+-// 
+-//               HPCCG: Simple Conjugate Gradient Benchmark Code
+-//                 Copyright (2006) Sandia Corporation
+-// 
+-// Under terms of Contract DE-AC04-94AL85000, there is a non-exclusive
+-// license for use of this work by or on behalf of the U.S. Government.
+-// 
+-// BSD 3-Clause License
+-// 
+-// Redistribution and use in source and binary forms, with or without
+-// modification, are permitted provided that the following conditions are met:
+-// 
+-// * Redistributions of source code must retain the above copyright notice, this
+-//   list of conditions and the following disclaimer.
+-// 
+-// * Redistributions in binary form must reproduce the above copyright notice,
+-//   this list of conditions and the following disclaimer in the documentation
+-//   and/or other materials provided with the distribution.
+-// 
+-// * Neither the name of the copyright holder nor the names of its
+-//   contributors may be used to endorse or promote products derived from
+-//   this software without specific prior written permission.
+-// 
+-// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+-// AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+-// IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+-// DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+-// FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+-// DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+-// SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+-// CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+-// OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+-// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+-// 
+-// Questions? Contact Michael A. Heroux (maherou@sandia.gov) 
+-// 
+-// ************************************************************************
+-//@HEADER
+-
+-/////////////////////////////////////////////////////////////////////////
+-
+-// Routine to read a sparse matrix, right hand side, initial guess, 
+-// and exact solution (as computed by a direct solver).
+-
+-/////////////////////////////////////////////////////////////////////////
+-
+-// nrow - number of rows of matrix (on this processor)
+-
+-#include <iostream>
+-using std::cout;
+-using std::cerr;
+-using std::endl;
+-#include <cstdlib>
+-#include <cstdio>
+-#include <cassert>
+-#include "generate_matrix.hpp"
+-void generate_matrix(int nx, int ny, int nz, HPC_Sparse_Matrix **A, double **x, double **b, double **xexact)
+-
+-{
+-#ifdef DEBUG
+-  int debug = 1;
+-#else
+-  int debug = 0;
+-#endif
+-
+-#ifdef USING_MPI
+-  int size, rank; // Number of MPI processes, My process ID
+-  MPI_Comm_size(MPI_COMM_WORLD, &size);
+-  MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+-#else
+-  int size = 1; // Serial case (not using MPI)
+-  int rank = 0;
+-#endif
+-
+-  *A = new HPC_Sparse_Matrix; // Allocate matrix struct and fill it
+-  (*A)->title = 0;
+-
+-
+-  // Set this bool to true if you want a 7-pt stencil instead of a 27 pt stencil
+-  bool use_7pt_stencil = false;
+-
+-  int local_nrow = nx*ny*nz; // This is the size of our subblock
+-  assert(local_nrow>0); // Must have something to work with
+-  int local_nnz = 27*local_nrow; // Approximately 27 nonzeros per row (except for boundary nodes)
+-
+-  int total_nrow = local_nrow*size; // Total number of grid points in mesh
+-  long long total_nnz = 27* (long long) total_nrow; // Approximately 27 nonzeros per row (except for boundary nodes)
+-
+-  int start_row = local_nrow*rank; // Each processor gets a section of a chimney stack domain
+-  int stop_row = start_row+local_nrow-1;
+-  
+-
+-  // Allocate arrays that are of length local_nrow
+-  (*A)->nnz_in_row = new int[local_nrow];
+-  (*A)->ptr_to_vals_in_row = new double*[local_nrow];
+-  (*A)->ptr_to_inds_in_row = new int   *[local_nrow];
+-  (*A)->ptr_to_diags       = new double*[local_nrow];
+-
+-  *x = new double[local_nrow];
+-  *b = new double[local_nrow];
+-  *xexact = new double[local_nrow];
+-
+-
+-  // Allocate arrays that are of length local_nnz
+-  (*A)->list_of_vals = new double[local_nnz];
+-  (*A)->list_of_inds = new int   [local_nnz];
+-
+-  double * curvalptr = (*A)->list_of_vals;
+-  int * curindptr = (*A)->list_of_inds;
+-
+-  long long nnzglobal = 0;
+-  for (int iz=0; iz<nz; iz++) {
+-    for (int iy=0; iy<ny; iy++) {
+-      for (int ix=0; ix<nx; ix++) {
+-	int curlocalrow = iz*nx*ny+iy*nx+ix;
+-	int currow = start_row+iz*nx*ny+iy*nx+ix;
+-	int nnzrow = 0;
+-	(*A)->ptr_to_vals_in_row[curlocalrow] = curvalptr;
+-	(*A)->ptr_to_inds_in_row[curlocalrow] = curindptr;
+-	for (int sz=-1; sz<=1; sz++) {
+-	  for (int sy=-1; sy<=1; sy++) {
+-	    for (int sx=-1; sx<=1; sx++) {
+-	      int curcol = currow+sz*nx*ny+sy*nx+sx;
+-//            Since we have a stack of nx by ny by nz domains , stacking in the z direction, we check to see
+-//            if sx and sy are reaching outside of the domain, while the check for the curcol being valid
+-//            is sufficient to check the z values
+-              if ((ix+sx>=0) && (ix+sx<nx) && (iy+sy>=0) && (iy+sy<ny) && (curcol>=0 && curcol<total_nrow)) {
+-                if (!use_7pt_stencil || (sz*sz+sy*sy+sx*sx<=1)) { // This logic will skip over point that are not part of a 7-pt stencil
+-                  if (curcol==currow) {
+-		    (*A)->ptr_to_diags[curlocalrow] = curvalptr;
+-		    *curvalptr++ = 27.0;
+-		  }
+-		  else {
+-		    *curvalptr++ = -1.0;
+-                  }
+-		  *curindptr++ = curcol;
+-		  nnzrow++;
+-	        } 
+-              }
+-	    } // end sx loop
+-          } // end sy loop
+-        } // end sz loop
+-	(*A)->nnz_in_row[curlocalrow] = nnzrow;
+-	nnzglobal += nnzrow;
+-	(*x)[curlocalrow] = 0.0;
+-	(*b)[curlocalrow] = 27.0 - ((double) (nnzrow-1));
+-	(*xexact)[curlocalrow] = 1.0;
+-      } // end ix loop
+-     } // end iy loop
+-  } // end iz loop  
+-  if (debug) cout << "Process "<<rank<<" of "<<size<<" has "<<local_nrow;
+-  
+-  if (debug) cout << " rows. Global rows "<< start_row
+-		  <<" through "<< stop_row <<endl;
+-  
+-  if (debug) cout << "Process "<<rank<<" of "<<size
+-		  <<" has "<<local_nnz<<" nonzeros."<<endl;
+-
+-  (*A)->start_row = start_row ; 
+-  (*A)->stop_row = stop_row;
+-  (*A)->total_nrow = total_nrow;
+-  (*A)->total_nnz = total_nnz;
+-  (*A)->local_nrow = local_nrow;
+-  (*A)->local_ncol = local_nrow;
+-  (*A)->local_nnz = local_nnz;
+-
+-  return;
+-}
+diff -Naur ../original_src/HPCCG/generate_matrix.hpp HPCCG/generate_matrix.hpp
+--- ../original_src/HPCCG/generate_matrix.hpp	2021-07-27 19:36:39.224279000 -0700
++++ HPCCG/generate_matrix.hpp	1969-12-31 16:00:00.000000000 -0800
+@@ -1,51 +0,0 @@
+-
+-//@HEADER
+-// ************************************************************************
+-// 
+-//               HPCCG: Simple Conjugate Gradient Benchmark Code
+-//                 Copyright (2006) Sandia Corporation
+-// 
+-// Under terms of Contract DE-AC04-94AL85000, there is a non-exclusive
+-// license for use of this work by or on behalf of the U.S. Government.
+-// 
+-// BSD 3-Clause License
+-// 
+-// Redistribution and use in source and binary forms, with or without
+-// modification, are permitted provided that the following conditions are met:
+-// 
+-// * Redistributions of source code must retain the above copyright notice, this
+-//   list of conditions and the following disclaimer.
+-// 
+-// * Redistributions in binary form must reproduce the above copyright notice,
+-//   this list of conditions and the following disclaimer in the documentation
+-//   and/or other materials provided with the distribution.
+-// 
+-// * Neither the name of the copyright holder nor the names of its
+-//   contributors may be used to endorse or promote products derived from
+-//   this software without specific prior written permission.
+-// 
+-// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+-// AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+-// IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+-// DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+-// FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+-// DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+-// SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+-// CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+-// OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+-// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+-// 
+-// Questions? Contact Michael A. Heroux (maherou@sandia.gov) 
+-// 
+-// ************************************************************************
+-//@HEADER
+-
+-#ifndef GENERATE_MATRIX_H
+-#define GENERATE_MATRIX_H
+-#ifdef USING_MPI
+-#include <mpi.h>
+-#endif
+-#include "HPC_Sparse_Matrix.hpp"
+-
+-void generate_matrix(int nx, int ny, int nz, HPC_Sparse_Matrix **A, double **x, double **b, double **xexact);
+-#endif
+diff -Naur ../original_src/HPCCG/main.cpp HPCCG/main.cpp
+--- ../original_src/HPCCG/main.cpp	2021-07-27 19:36:39.228230000 -0700
++++ HPCCG/main.cpp	2021-07-27 20:50:53.134914000 -0700
+@@ -1,293 +1,311 @@
+-
+-//@HEADER
+-// ************************************************************************
+-// 
+-//               HPCCG: Simple Conjugate Gradient Benchmark Code
+-//                 Copyright (2006) Sandia Corporation
+-// 
+-// Under terms of Contract DE-AC04-94AL85000, there is a non-exclusive
+-// license for use of this work by or on behalf of the U.S. Government.
+-// 
+-// BSD 3-Clause License
+-// 
+-// Redistribution and use in source and binary forms, with or without
+-// modification, are permitted provided that the following conditions are met:
+-// 
+-// * Redistributions of source code must retain the above copyright notice, this
+-//   list of conditions and the following disclaimer.
+-// 
+-// * Redistributions in binary form must reproduce the above copyright notice,
+-//   this list of conditions and the following disclaimer in the documentation
+-//   and/or other materials provided with the distribution.
+-// 
+-// * Neither the name of the copyright holder nor the names of its
+-//   contributors may be used to endorse or promote products derived from
+-//   this software without specific prior written permission.
+-// 
+-// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+-// AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+-// IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+-// DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+-// FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+-// DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+-// SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+-// CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+-// OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+-// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+-// 
+-// Questions? Contact Michael A. Heroux (maherou@sandia.gov) 
+-// 
+-// ************************************************************************
+-//@HEADER
+-
+-// Main routine of a program that reads a sparse matrix, right side
+-// vector, solution vector and initial guess from a file  in HPC
+-// format.  This program then calls the HPCCG conjugate gradient
+-// solver to solve the problem, and then prints results.
+-
+-// Calling sequence:
+-
+-// test_HPCCG linear_system_file
+-
+-// Routines called:
+-
+-// read_HPC_row - Reads in linear system
+-
+-// mytimer - Timing routine (compile with -DWALL to get wall clock
+-//           times
+-
+-// HPCCG - CG Solver
+-
+-// compute_residual - Compares HPCCG solution to known solution.
+-
+-#include <iostream>
+-using std::cout;
+-using std::cerr;
+-using std::endl;
+-#include <cstdio>
+ #include <cstdlib>
++#include <cstdio>
++#include <iostream>
+ #include <cctype>
+-#include <cassert>
+-#include <string>
+-#include <cmath>
+-#ifdef USING_MPI
+-#include <mpi.h> // If this routine is compiled with -DUSING_MPI
+-                 // then include mpi.h
+-#include "make_local_matrix.hpp" // Also include this function
+-#endif
+-#ifdef USING_OMP
++#include <executionTime.h>
++#include <datautils.hpp>
++#include <approx.h>
+ #include <omp.h>
+-#endif
+-#include "generate_matrix.hpp"
+-#include "read_HPC_row.hpp"
+-#include "mytimer.hpp"
+-#include "HPC_sparsemv.hpp"
+-#include "compute_residual.hpp"
+-#include "HPCCG.hpp"
+-#include "HPC_Sparse_Matrix.hpp"
+-#include "dump_matlab_matrix.hpp"
+ 
+-#include "YAML_Element.hpp"
+-#include "YAML_Doc.hpp"
+ 
+-#undef DEBUG
++#define DOUBLE 0
++#define FLOAT 1
++#define INT 2
++#define LONG 3
++#include <cmath>
++using std::fabs;
+ 
+-int main(int argc, char *argv[])
++const int max_external = 100000;
++const int max_num_messages = 500;
++const int max_num_neighbors = max_num_messages;
++
++char   *HPC_title;
++int HPC_start_row;
++int HPC_stop_row;
++int HPC_total_nrow;
++long long HPC_total_nnz;
++int HPC_local_nrow;
++int HPC_local_ncol;  // Must be defined in make_local_matrix
++int HPC_local_nnz;
++int  * HPC_nnz_in_row;
++double ** HPC_ptr_to_vals_in_row;
++int ** HPC_ptr_to_inds_in_row;
++double ** HPC_ptr_to_diags;
++double *HPC_list_of_vals;   //needed for cleaning up memory
++int *HPC_list_of_inds;      //needed for cleaning up memory
++
++
++int ddot (const int n, const double * const x, const double * const y, 
++        double * const result, double& time_allreduce)
++{  
++    double local_result = 0.0;
++    int i;
++    if (y==x){
++//@APPROX LABEL("ddot_r2") APPROX_TECH(PERFO|MEMO_IN|MEMO_OUT) IN(x[0:n]) INOUT(local_result)
++#pragma omp parallel for reduction (+:local_result) firstprivate(n) 
++        for ( i=0; i<n; i++) {
++            local_result = local_result+ x[i]*x[i];
++        }
++    }
++    else{
++//@APPROX LABEL("ddot") APPROX_TECH(PERFO|MEMO_IN|MEMO_OUT) IN(x[0:n], y[0:n]) INOUT(local_result)
++#pragma omp parallel for reduction (+:local_result)
++        for (i=0; i<n; i++){
++            local_result = local_result + x[i]*y[i];
++        }
++    }
++
++    *result = local_result;
++    return(0);
++}
++//waxpby.cpp
++int waxpby (const int n, const double alpha, const double * const x, 
++        const double beta, const double * const y, 
++        double * const w)
++{  
++    int i;
++    if (alpha==1.0) {
++//@APPROX LABEL("waxpby") APPROX_TECH(PERFO|MEMO_OUT|MEMO_IN) OUT(w[0:n]) IN(x[0:n], y[0:n], beta)
++#pragma omp parallel for firstprivate(beta,n)
++        for (i=0; i<n; i++) {
++            w[i] = x[i] + beta * y[i];
++        }
++    }
++    else if(beta==1.0) {
++#pragma omp parallel for firstprivate(alpha,n)
++        for (i=0; i<n; i++) {
++            w[i] = alpha * x[i] + y[i];
++        }
++    }
++    else {
++#pragma omp parallel for firstprivate(alpha,beta,n)
++        for (i=0; i<n; i++) {
++            w[i] = alpha * x[i] + beta * y[i];
++        }
++    }
++    return(0);
++}
++
++int compute_residual(const int n, const double * const v1, 
++        const double * const v2, double * const residual)
+ {
++    double local_residual = 0.0;
++    int i;
++    for (i=0; i<n; i++) {
++        if ( *(long *) &v1[i] != *(long *) &v2[i]){
++            double diff = fabs(v1[i] - v2[i]);
++            if (diff > local_residual) local_residual = diff;
++        }
++    }
++    *residual = local_residual;
++    return(0);
++}
+ 
+-  HPC_Sparse_Matrix *A;
+-  double *x, *b, *xexact;
+-  double norm, d;
+-  int ierr = 0;
+-  int i, j;
+-  int ione = 1;
+-  double times[7];
+-  double t6 = 0.0;
+-  int nx,ny,nz;
+-
+-#ifdef USING_MPI
+-
+-  MPI_Init(&argc, &argv);
+-  int size, rank; // Number of MPI processes, My process ID
+-  MPI_Comm_size(MPI_COMM_WORLD, &size);
+-  MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+-
+-  //  if (size < 100) cout << "Process "<<rank<<" of "<<size<<" is alive." <<endl;
+-
+-#else
+-
+-  int size = 1; // Serial case (not using MPI)
+-  int rank = 0; 
+-
+-#endif
+-
+-
+-#ifdef DEBUG
+-  if (rank==0)
+-   {
+-    int junk = 0;
+-    cout << "Press enter to continue"<< endl;
+-    cin >> junk;
+-   }
+-
+-  MPI_Barrier(MPI_COMM_WORLD);
+-#endif
+-
+-
+-  if(argc != 2 && argc!=4) {
+-    if (rank==0)
+-      cerr << "Usage:" << endl
+-	   << "Mode 1: " << argv[0] << " nx ny nz" << endl
+-	   << "     where nx, ny and nz are the local sub-block dimensions, or" << endl
+-	   << "Mode 2: " << argv[0] << " HPC_data_file " << endl
+-	   << "     where HPC_data_file is a globally accessible file containing matrix data." << endl;
+-    exit(1);
+-  }
+ 
+-  if (argc==4) 
+-  {
+-    nx = atoi(argv[1]);
+-    ny = atoi(argv[2]);
+-    nz = atoi(argv[3]);
+-    generate_matrix(nx, ny, nz, &A, &x, &b, &xexact);
+-  }
+-  else
+-  {
+-    read_HPC_row(argv[1], &A, &x, &b, &xexact);
+-  }
+-
+-
+-  bool dump_matrix = false;
+-  if (dump_matrix && size<=4) dump_matlab_matrix(A, rank);
+-
+-#ifdef USING_MPI
+-
+-  // Transform matrix indices from global to local values.
+-  // Define number of columns for the local matrix.
+-
+-  t6 = mytimer(); make_local_matrix(A);  t6 = mytimer() - t6;
+-  times[6] = t6;
+-
+-#endif
+-
+-  double t1 = mytimer();   // Initialize it (if needed)
+-  int niters = 0;
+-  double normr = 0.0;
+-  int max_iter = 150;
+-  double tolerance = 0.0; // Set tolerance to zero to make all runs do max_iter iterations
+-  ierr = HPCCG( A, b, x, max_iter, tolerance, niters, normr, times);
+-
+-	if (ierr) cerr << "Error in call to CG: " << ierr << ".\n" << endl;
+-
+-#ifdef USING_MPI
+-      double t4 = times[4];
+-      double t4min = 0.0;
+-      double t4max = 0.0;
+-      double t4avg = 0.0;
+-      MPI_Allreduce(&t4, &t4min, 1, MPI_DOUBLE, MPI_MIN, MPI_COMM_WORLD);
+-      MPI_Allreduce(&t4, &t4max, 1, MPI_DOUBLE, MPI_MAX, MPI_COMM_WORLD);
+-      MPI_Allreduce(&t4, &t4avg, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
+-      t4avg = t4avg/((double) size);
+-#endif
++int HPC_sparsemv(const double * const x, double * const y)
++{
++    const int nrow = HPC_local_nrow;
++    int i;
++//@APPROX LABEL("SPARSE_MV_OUTER") APPROX_TECH(PERFO) 
++#pragma omp parallel for firstprivate(nrow)
++    for (i=0; i< nrow; i++)
++    {
++        int j;
++        double sum = 0.0;
++        const int    * const cur_inds = 
++            (const int    * const) HPC_ptr_to_inds_in_row[i];
++
++        const int cur_nnz = (const int) HPC_nnz_in_row[i];
++
++//@APPROX LABEL("SPARSE_MV_INNER") APPROX_TECH(PERFO|MEMO_OUT) INOUT(sum)
++        for (j=0; j< cur_nnz; j++)
++            sum += HPC_ptr_to_vals_in_row[i][j]*x[cur_inds[j]];
++        y[i] = sum;
++    }
++    return(0);
++}
+ 
+-// initialize YAML doc
+ 
+-  if (rank==0)  // Only PE 0 needs to compute and report timing results
++//generate_matrix.cpp
++//
++void generate_matrix(int nx, int ny, int nz, double **x, double **b, double **xexact)
++{
++    int size = 1; // Serial case (not using MPI)
++    int rank = 0;
++    HPC_title = 0;
++    bool use_7pt_stencil = false;
++    int local_nrow = nx*ny*nz; // This is the size of our subblock
++    int local_nnz = 27*local_nrow; // Approximately 27 nonzeros per row (except for boundary nodes)
++    int total_nrow = local_nrow*size; // Total number of grid points in mesh
++    long long total_nnz = 27* (long long) total_nrow; // Approximately 27 nonzeros per row (except for boundary nodes)
++    int start_row = local_nrow*rank; // Each processor gets a section of a chimney stack domain
++    int stop_row = start_row+local_nrow-1;
++    // Allocate arrays that are of length local_nrow
++    int tmp_size = local_nrow;
++    HPC_nnz_in_row = new int[local_nrow];
++    HPC_ptr_to_vals_in_row = new double*[local_nrow];
++    HPC_ptr_to_inds_in_row = new int*[local_nrow];
++    HPC_ptr_to_diags       = new double*[local_nrow];
++
++    *x =  new double[local_nrow];
++    *b =  new double[local_nrow];
++    *xexact =  new double[local_nrow];
++
++    HPC_list_of_vals = new double[local_nnz];
++    HPC_list_of_inds = new int   [local_nnz];
++
++    double* curvalptr = HPC_list_of_vals;
++    int* curindptr = HPC_list_of_inds;
++
++    long long nnzglobal = 0;
++    int iz;
++    int iy;
++    int ix;
++    for (iz=0; iz<nz; iz++) {
++        for (iy=0; iy<ny; iy++) {
++            for (ix=0; ix<nx; ix++) {
++                int curlocalrow = iz*nx*ny+iy*nx+ix;
++                int currow = start_row+iz*nx*ny+iy*nx+ix;
++                int nnzrow = 0;
++                HPC_ptr_to_vals_in_row[curlocalrow] = curvalptr;
++                HPC_ptr_to_inds_in_row[curlocalrow] = curindptr;
++                int sx, sy, sz;
++                for (sz=-1; sz<=1; sz++) {
++                    for (sy=-1; sy<=1; sy++) {
++                        for (sx=-1; sx<=1; sx++) {
++                            int curcol = currow+sz*nx*ny+sy*nx+sx;
++                            if ((ix+sx>=0) && (ix+sx<nx) && (iy+sy>=0) && (iy+sy<ny) && (curcol>=0 && curcol<total_nrow)) {
++                                if (!use_7pt_stencil || (sz*sz+sy*sy+sx*sx<=1)) { // This logic will skip over point that are not part of a 7-pt stencil
++                                    if (curcol==currow) {
++                                        HPC_ptr_to_diags[curlocalrow] = curvalptr;
++                                        *curvalptr++ = 27.0;
++                                    }
++                                    else {
++                                        *curvalptr++ = -1.0;
++                                    }
++                                    *curindptr++ = curcol;
++                                    nnzrow++;
++                                } 
++                            }
++                        } // end sx loop
++                    } // end sy loop
++                } // end sz loop
++                HPC_nnz_in_row[curlocalrow] = nnzrow;
++                nnzglobal += nnzrow;
++                (*x)[curlocalrow] = 0.0;
++                (*b)[curlocalrow] = 27.0 - ((double) (nnzrow-1));
++                (*xexact)[curlocalrow] = 1.0;
++            } // end ix loop
++        } // end iy loop
++    } // end iz loop  
++    HPC_start_row = start_row ; 
++    HPC_stop_row = stop_row;
++    HPC_total_nrow = total_nrow;
++    HPC_total_nnz = total_nnz;
++    HPC_local_nrow = local_nrow;
++    HPC_local_ncol = local_nrow;
++    HPC_local_nnz = local_nnz;
++    return;
++}
++
++int HPCCG(const double * const b, double * const x,
++        const int max_iter, const double tolerance, int &niters, double & normr,
++        double * times)
++{
++    double t0 = 0.0, t1 = 0.0, t2 = 0.0, t3 = 0.0, t4 = 0.0;
++    int nrow = HPC_local_nrow;
++    int ncol = HPC_local_ncol;
++    double * r =  new double[nrow];
++    double * p =  new double[ncol];
++    double * Ap = new double[nrow];
++
++    normr = 0.0;
++    double rtrans = 0.0;
++    double oldrtrans = 0.0;
++
++    int rank = 0; // Serial case (not using MPI)
++
++    int print_freq = max_iter/10; 
++    if (print_freq>50) print_freq=50;
++    if (print_freq<1)  print_freq=1;
++
++    // p is of length ncols, copy x to p for sparse MV operation
++    waxpby(nrow, 1.0, x, 0.0, x, p); 
++    HPC_sparsemv( p, Ap); 
++    waxpby(nrow, 1.0, b, -1.0, Ap, r);
++    ddot(nrow, r, r, &rtrans, t4);
++    normr = sqrt(rtrans);
++    int k;
++    for(k=1; k<max_iter && normr > tolerance; k++ )
+     {
+-      double fniters = niters; 
+-      double fnrow = A->total_nrow;
+-      double fnnz = A->total_nnz;
+-      double fnops_ddot = fniters*4*fnrow;
+-      double fnops_waxpby = fniters*6*fnrow;
+-      double fnops_sparsemv = fniters*2*fnnz;
+-      double fnops = fnops_ddot+fnops_waxpby+fnops_sparsemv;
+-
+-      YAML_Doc doc("hpccg", "1.0");
+-
+-      doc.add("Parallelism","");
+-
+-#ifdef USING_MPI
+-          doc.get("Parallelism")->add("Number of MPI ranks",size);
+-#else
+-          doc.get("Parallelism")->add("MPI not enabled","");
+-#endif
+-
+-#ifdef USING_OMP
+-          int nthreads = 1;
+-#pragma omp parallel
+-          nthreads = omp_get_num_threads();
+-          doc.get("Parallelism")->add("Number of OpenMP threads",nthreads);
+-#else
+-          doc.get("Parallelism")->add("OpenMP not enabled","");
+-#endif
+-
+-      doc.add("Dimensions","");
+-	  doc.get("Dimensions")->add("nx",nx);
+-	  doc.get("Dimensions")->add("ny",ny);
+-	  doc.get("Dimensions")->add("nz",nz);
+-
+-
+-
+-      doc.add("Number of iterations", niters);
+-      doc.add("Final residual", normr);
+-      doc.add("#********** Performance Summary (times in sec) ***********","");
+- 
+-      doc.add("Time Summary","");
+-      doc.get("Time Summary")->add("Total   ",times[0]);
+-      doc.get("Time Summary")->add("DDOT    ",times[1]);
+-      doc.get("Time Summary")->add("WAXPBY  ",times[2]);
+-      doc.get("Time Summary")->add("SPARSEMV",times[3]);
+-
+-      doc.add("FLOPS Summary","");
+-      doc.get("FLOPS Summary")->add("Total   ",fnops);
+-      doc.get("FLOPS Summary")->add("DDOT    ",fnops_ddot);
+-      doc.get("FLOPS Summary")->add("WAXPBY  ",fnops_waxpby);
+-      doc.get("FLOPS Summary")->add("SPARSEMV",fnops_sparsemv);
+-
+-      doc.add("MFLOPS Summary","");
+-      doc.get("MFLOPS Summary")->add("Total   ",fnops/times[0]/1.0E6);
+-      doc.get("MFLOPS Summary")->add("DDOT    ",fnops_ddot/times[1]/1.0E6);
+-      doc.get("MFLOPS Summary")->add("WAXPBY  ",fnops_waxpby/times[2]/1.0E6);
+-      doc.get("MFLOPS Summary")->add("SPARSEMV",fnops_sparsemv/(times[3])/1.0E6);
+-
+-#ifdef USING_MPI
+-      doc.add("DDOT Timing Variations","");
+-      doc.get("DDOT Timing Variations")->add("Min DDOT MPI_Allreduce time",t4min);
+-      doc.get("DDOT Timing Variations")->add("Max DDOT MPI_Allreduce time",t4max);
+-      doc.get("DDOT Timing Variations")->add("Avg DDOT MPI_Allreduce time",t4avg);
+-
+-      double totalSparseMVTime = times[3] + times[5]+ times[6];
+-      doc.add("SPARSEMV OVERHEADS","");
+-      doc.get("SPARSEMV OVERHEADS")->add("SPARSEMV MFLOPS W OVERHEAD",fnops_sparsemv/(totalSparseMVTime)/1.0E6);
+-      doc.get("SPARSEMV OVERHEADS")->add("SPARSEMV PARALLEL OVERHEAD Time", (times[5]+times[6]));
+-      doc.get("SPARSEMV OVERHEADS")->add("SPARSEMV PARALLEL OVERHEAD Pct", (times[5]+times[6])/totalSparseMVTime*100.0);
+-      doc.get("SPARSEMV OVERHEADS")->add("SPARSEMV PARALLEL OVERHEAD Setup Time", (times[6]));
+-      doc.get("SPARSEMV OVERHEADS")->add("SPARSEMV PARALLEL OVERHEAD Setup Pct", (times[6])/totalSparseMVTime*100.0);
+-      doc.get("SPARSEMV OVERHEADS")->add("SPARSEMV PARALLEL OVERHEAD Bdry Exch Time", (times[5]));
+-      doc.get("SPARSEMV OVERHEADS")->add("SPARSEMV PARALLEL OVERHEAD Bdry Exch Pct", (times[5])/totalSparseMVTime*100.0);
+-#endif
+-  
+-      if (rank == 0) { // only PE 0 needs to compute and report timing results
+-        std::string yaml = doc.generateYAML();
+-        cout << yaml;
+-       }
++        if (k == 1)
++        {
++            waxpby(nrow, 1.0, r, 0.0, r, p);
++        }
++        else
++        {
++            oldrtrans = rtrans;
++            ddot (nrow, r, r, &rtrans, t4); 
++            double beta = rtrans/oldrtrans;
++            waxpby (nrow, 1.0, r, beta, p, p); 
++        }
++        normr = sqrt(rtrans);
++        if (rank==0 && (k%print_freq == 0 || k+1 == max_iter)){
++            std::cout << "Iteration = "<< k << "   Residual = "<< normr << std::endl;
++        }
++        HPC_sparsemv(p, Ap); // 2*nnz ops
++        double alpha = 0.0;
++        ddot(nrow, p, Ap, &alpha, t4);
++        alpha = rtrans/alpha;
++        waxpby(nrow, 1.0, x, alpha, p, x);// 2*nrow ops
++        waxpby(nrow, 1.0, r, -alpha, Ap, r);  
++        niters = k;
+     }
++    printf("I executed %d Iters\n", niters);
+ 
+-  // Compute difference between known exact solution and computed solution
+-  // All processors are needed here.
++    delete[] p;
++    delete[] Ap;
++    delete[] r;
++    return(0);
++}
+ 
+-  double residual = 0;
+-  //  if ((ierr = compute_residual(A->local_nrow, x, xexact, &residual)))
+-  //  cerr << "Error in call to compute_residual: " << ierr << ".\n" << endl;
+-
+-  // if (rank==0)
+-  //   cout << "Difference between computed and exact  = " 
+-  //        << residual << ".\n" << endl;
+-
+-
+-  // Finish up
+-#ifdef USING_MPI
+-  MPI_Finalize();
+-#endif
+-  return 0 ;
+-} 
++int main(int argc, char *argv[])
++{
++    int niters = 0;
++    double normr = 0.0;
++    int max_iter = 150;
++    double tolerance = 0.0; 
++    double *x, *b, *xexact;
++    double norm, d;
++    int ierr = 0;
++    int i, j;
++    int ione = 1;
++    double times[7];
++    double t6 = 0.0;
++    int nx,ny,nz;
++    int size = 1; // Serial case (not using MPI)
++    int rank = 0; 
++    char *quality;
++    nx = atoi(argv[1]);
++    ny = atoi(argv[2]);
++    nz = atoi(argv[3]);
++    quality = argv[4];
++    generate_matrix(nx, ny, nz, &x, &b, &xexact);
++    startMeasure();
++    ierr = HPCCG(  b, x, max_iter, tolerance, niters, normr, times);
++    stopMeasure();
++    size_t val = nx*ny*nz;
++    double actualResidual;
++    compute_residual(nx*ny*nz,x, xexact , &actualResidual);
++    writeData(&actualResidual,1, DOUBLE,quality);   
++    delete [] x;
++    delete [] b;
++    delete [] xexact;
++    delete [] HPC_nnz_in_row;
++    delete [] HPC_ptr_to_vals_in_row;
++    delete [] HPC_ptr_to_inds_in_row;
++    delete [] HPC_ptr_to_diags;
++    delete [] HPC_list_of_vals;
++    delete [] HPC_list_of_inds;
++    return 0 ;
++}
+diff -Naur ../original_src/HPCCG/make_local_matrix.cpp HPCCG/make_local_matrix.cpp
+--- ../original_src/HPCCG/make_local_matrix.cpp	2021-07-27 19:36:39.232245000 -0700
++++ HPCCG/make_local_matrix.cpp	1969-12-31 16:00:00.000000000 -0800
+@@ -1,611 +0,0 @@
+-
+-//@HEADER
+-// ************************************************************************
+-// 
+-//               HPCCG: Simple Conjugate Gradient Benchmark Code
+-//                 Copyright (2006) Sandia Corporation
+-// 
+-// Under terms of Contract DE-AC04-94AL85000, there is a non-exclusive
+-// license for use of this work by or on behalf of the U.S. Government.
+-// 
+-// BSD 3-Clause License
+-// 
+-// Redistribution and use in source and binary forms, with or without
+-// modification, are permitted provided that the following conditions are met:
+-// 
+-// * Redistributions of source code must retain the above copyright notice, this
+-//   list of conditions and the following disclaimer.
+-// 
+-// * Redistributions in binary form must reproduce the above copyright notice,
+-//   this list of conditions and the following disclaimer in the documentation
+-//   and/or other materials provided with the distribution.
+-// 
+-// * Neither the name of the copyright holder nor the names of its
+-//   contributors may be used to endorse or promote products derived from
+-//   this software without specific prior written permission.
+-// 
+-// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+-// AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+-// IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+-// DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+-// FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+-// DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+-// SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+-// CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+-// OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+-// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+-// 
+-// Questions? Contact Michael A. Heroux (maherou@sandia.gov) 
+-// 
+-// ************************************************************************
+-//@HEADER
+-
+-#ifdef USING_MPI  // Compile this routine only if running in parallel
+-#include <iostream>
+-using std::cout;
+-using std::cerr;
+-using std::endl;
+-#include <map>
+-#include <algorithm>
+-#include <cstdlib>
+-#include <cstdio>
+-#include <cassert>
+-#include "HPC_Sparse_Matrix.hpp"
+-#include "read_HPC_row.hpp"
+-#include "make_local_matrix.hpp"
+-#include "mytimer.hpp"
+-//#define DEBUG
+-void make_local_matrix(HPC_Sparse_Matrix * A)
+-{
+-  std::map< int, int > externals;
+-  int i, j, k;
+-  int num_external = 0;
+-  double t0;
+-
+-  int debug_details = 0; // Set to 1 for voluminous output
+-#ifdef DEBUG
+-  int debug = 1;
+-#else
+-  int debug = 0;
+-#endif
+-
+-  // Get MPI process info
+-
+-  int size, rank; // Number of MPI processes, My process ID
+-  MPI_Comm_size(MPI_COMM_WORLD, &size);
+-  MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+-
+-  
+-  // Extract Matrix pieces
+-
+-  int start_row = A->start_row;
+-  int stop_row = A->stop_row;
+-  int total_nrow = A->total_nrow;
+-  long long total_nnz = A->total_nnz;
+-  int local_nrow = A->local_nrow;
+-  int local_nnz = A->local_nnz;
+-  int  * nnz_in_row = A->nnz_in_row;
+-  double ** ptr_to_vals_in_row = A->ptr_to_vals_in_row;
+-  int ** ptr_to_inds_in_row = A->ptr_to_inds_in_row;
+-  
+-  
+-
+-  // We need to convert the index values for the rows on this processor
+-  // to a local index space. We need to:
+-  // - Determine if each index reaches to a local value or external value
+-  // - If local, subtract start_row from index value to get local index
+-  // - If external, find out if it is already accounted for.  
+-  //   - If so, then do nothing, 
+-  //   - otherwise 
+-  //     - add it to the list of external indices,  
+-  //     - find out which processor owns the value. 
+-  //     - Set up communication for sparse MV operation.
+-  
+-  
+-  ///////////////////////////////////////////
+-  // Scan the indices and transform to local
+-    ///////////////////////////////////////////
+-
+-  if (debug) t0 = mytimer();
+-
+-  int *external_index = new int[max_external];
+-  int *external_local_index = new int[max_external];
+-  A->external_index = external_index;
+-  A->external_local_index = external_local_index;
+-
+-  for (i=0; i< local_nrow; i++)
+-    {
+-      for (j=0; j<nnz_in_row[i]; j++)
+-	{
+-	  int cur_ind = ptr_to_inds_in_row[i][j];
+-	  if (debug_details)
+-	    cout << "Process "<<rank<<" of "<<size<<" getting index "
+-		 <<cur_ind<<" in local row "<<i<<endl;
+-	  if (start_row <= cur_ind && cur_ind <= stop_row)
+-	    {
+-	      ptr_to_inds_in_row[i][j] -= start_row;
+-	    }
+-	  else // Must find out if we have already set up this point
+-	    {
+-	      if (externals.find(cur_ind)==externals.end())
+-		{
+-		  externals[cur_ind] = num_external++;
+-		  if (num_external<=max_external)
+-		    {
+-		      external_index[num_external-1] = cur_ind;
+-		      // Mark index as external by negating it
+-		      ptr_to_inds_in_row[i][j] = - (ptr_to_inds_in_row[i][j] + 1);
+-		    }
+-		  else 
+-		    {
+-		      cerr << "Must increase max_external in HPC_Sparse_Matrix.hpp"
+-			   <<endl;
+-		      abort();
+-		    }
+-		}
+-	      else
+-		{
+-		  // Mark index as external by adding 1 and negating it
+-		  ptr_to_inds_in_row[i][j] = - (ptr_to_inds_in_row[i][j] + 1);
+-		}
+-	    }
+-	}
+-    }
+-
+-  if (debug) {
+-    t0 = mytimer() - t0;
+-    cout << "            Time in transform to local phase = " << t0 << endl;
+-    cout << "Processor " << rank << " of " << size <<
+-	       ": Number of external equations = " << num_external << endl;
+-  }
+-
+-  ////////////////////////////////////////////////////////////////////////////
+-  // Go through list of externals to find out which processors must be accessed.
+-  ////////////////////////////////////////////////////////////////////////////
+-
+-  if (debug) t0 = mytimer();
+-
+-  A->num_external = num_external;
+-  int * tmp_buffer  = new int[size];  // Temp buffer space needed below
+-
+-  // Build list of global index offset
+-
+-  int * global_index_offsets = new int[size];
+-  for (i=0;i<size; i++) tmp_buffer[i] = 0;  // First zero out
+-
+-  tmp_buffer[rank] = start_row; // This is my start row
+-
+-  // This call sends the start_row of each ith processor to the ith 
+-  // entry of global_index_offset on all processors.
+-  // Thus, each processor know the range of indices owned by all
+-  // other processors.
+-  // Note:  There might be a better algorithm for doing this, but this
+-  //        will work...
+-
+-  MPI_Allreduce(tmp_buffer, global_index_offsets, size, MPI_INT,
+-		MPI_SUM, MPI_COMM_WORLD);
+-
+-  // Go through list of externals and find the processor that owns each
+-  int * external_processor = new int[num_external];
+-  int * new_external_processor = new int[num_external];
+-
+-  for (i=0; i< num_external; i++)
+-    {
+-      int cur_ind = external_index[i];
+-      for (int j=size-1; j>=0; j--)
+-	if (global_index_offsets[j] <= cur_ind) 
+-	  {
+-	    external_processor[i] = j;
+-	    break;
+-	  }
+-    }
+-  if (debug) {
+-    t0 = mytimer() - t0;
+-    cout << "          Time in finding processors phase = " << t0 << endl;
+-  }
+-
+-
+-  ////////////////////////////////////////////////////////////////////////////
+-  // Sift through the external elements. For each newly encountered external
+-  // point assign it the next index in the sequence. Then look for other
+-  // external elements who are update by the same node and assign them the next
+-  // set of index numbers in the sequence (ie. elements updated by the same node
+-  // have consecutive indices).
+-  ////////////////////////////////////////////////////////////////////////////
+-
+-  if (debug) t0 = mytimer();
+-
+-  int count = local_nrow;
+-  for (i = 0; i < num_external; i++) external_local_index[i] = -1;
+-
+-  for (i = 0; i < num_external; i++) {
+-    if (external_local_index[i] == -1) {
+-      external_local_index[i] = count++;
+-
+-      for (j = i + 1; j < num_external; j++) {
+-        if (external_processor[j] == external_processor[i]) 
+-	  external_local_index[j] = count++;
+-      }
+-    }
+-  }
+-
+-  if (debug) {
+-    t0 = mytimer() - t0;
+-    cout << "           Time in scanning external indices phase = " << t0 << endl;
+-  }
+-  if (debug) t0 = mytimer();
+-
+-
+-  for (i=0; i< local_nrow; i++)
+-    {
+-      for (j=0; j<nnz_in_row[i]; j++)
+-	{
+-	  if (ptr_to_inds_in_row[i][j]<0) // Change index values of externals
+-	    {
+-	      int cur_ind = - ptr_to_inds_in_row[i][j] - 1;
+-	      ptr_to_inds_in_row[i][j] = external_local_index[externals[cur_ind]];
+-	    }
+-	}
+-    }
+-
+-  for (i = 0 ; i < num_external; i++)  new_external_processor[i] = 0;
+-
+-  for (i = 0; i < num_external; i++)
+-      new_external_processor[external_local_index[i] - local_nrow] = 
+-	external_processor[i];
+-
+-  if (debug) {
+-    t0 = mytimer() - t0;
+-    cout << "           Time in assigning external indices phase = " << t0 << endl;
+-  }
+-
+-  if (debug_details)
+-    {
+-      for (i = 0; i < num_external; i++)
+-	{
+-	  cout << "Processor " << rank << " of " << size <<
+-	    ": external processor["<< i<< "] = " << external_processor[i]<< endl;
+-	  cout << "Processor " << rank << " of " << size <<
+-	    ": new external processor["<< i<< "] = " 
+-	       << new_external_processor[i]<< endl;
+-	}
+-    }
+-
+-  ////////////////////////////////////////////////////////////////////////////
+-  ///
+-  // Count the number of neighbors from which we receive information to update
+-  // our external elements. Additionally, fill the array tmp_neighbors in the
+-  // following way:
+-  //      tmp_neighbors[i] = 0   ==>  No external elements are updated by
+-  //                              processor i.
+-  //      tmp_neighbors[i] = x   ==>  (x-1)/size elements are updated from
+-  //                              processor i.
+-  ///
+-  ////////////////////////////////////////////////////////////////////////////
+-
+-  t0 = mytimer();
+-  int * tmp_neighbors = new int[size];
+-  for (i = 0 ; i < size ; i++)  tmp_neighbors[i] = 0;
+-
+-  int num_recv_neighbors = 0;
+-  int length             = 1;
+-
+-  for (i = 0; i < num_external; i++) 
+-    {
+-      if (tmp_neighbors[new_external_processor[i]] == 0) 
+-	{
+-	  num_recv_neighbors++;
+-	  tmp_neighbors[new_external_processor[i]] = 1;
+-	}
+-      tmp_neighbors[new_external_processor[i]] += size;
+-    }
+-
+-  /// sum over all processors all the tmp_neighbors arrays ///
+-
+-  MPI_Allreduce(tmp_neighbors, tmp_buffer, size, MPI_INT, MPI_SUM, 
+-		MPI_COMM_WORLD);
+-
+-  /// decode the combined 'tmp_neighbors' (stored in tmp_buffer) 
+-  //  array from all the processors
+-
+-  int num_send_neighbors = tmp_buffer[rank] % size;
+-
+-  /// decode 'tmp_buffer[rank] to deduce total number of elements 
+-  //  we must send
+-
+-  int total_to_be_sent = (tmp_buffer[rank] - num_send_neighbors) / size;
+-
+-  //
+-  // Check to see if we have enough workspace allocated.  This could be 
+-  // dynamically modified, but let's keep it simple for now...
+-  //
+-
+-  if (num_send_neighbors > max_num_messages)
+-    {
+-      cerr << "Must increase max_num_messages in HPC_Sparse_Matrix.hpp"
+-	   <<endl;
+-      cerr << "Must be at least " <<  num_send_neighbors <<endl;
+-      abort();
+-    }
+-
+-  if (total_to_be_sent > max_external )
+-    {
+-      cerr << "Must increase max_external in HPC_Sparse_Matrix.hpp"
+-	   <<endl;
+-      cerr << "Must be at least " << total_to_be_sent <<endl;
+-      abort();
+-    }
+-  delete [] tmp_neighbors;
+-
+-  if (debug) {
+-    t0 = mytimer() - t0;
+-    cout << "           Time in finding neighbors phase = " << t0 << endl;
+-  }
+-  if (debug) cout << "Processor " << rank << " of " << size <<
+-	       ": Number of send neighbors = " << num_send_neighbors << endl;
+-
+-  if (debug) cout << "Processor " << rank << " of " << size <<
+-	       ": Number of receive neighbors = " << num_recv_neighbors << endl;
+-
+-  if (debug) cout << "Processor " << rank << " of " << size <<
+-	       ": Total number of elements to send = " << total_to_be_sent << endl;
+-
+-  if (debug) MPI_Barrier(MPI_COMM_WORLD);
+-
+-  /////////////////////////////////////////////////////////////////////////
+-  ///
+-  // Make a list of the neighbors that will send information to update our
+-  // external elements (in the order that we will receive this information).
+-  ///
+-  /////////////////////////////////////////////////////////////////////////
+-
+-  int * recv_list = new int[max_external];
+-
+-  j = 0;
+-  recv_list[j++] = new_external_processor[0];
+-  for (i = 1; i < num_external; i++) {
+-    if (new_external_processor[i - 1] != new_external_processor[i]) {
+-      recv_list[j++] = new_external_processor[i];
+-    }
+-  }
+-
+-  //
+-  // Send a 0 length message to each of our recv neighbors
+-  //
+-
+-  int * send_list = new int[num_send_neighbors];
+-  for (i = 0 ; i < num_send_neighbors; i++ ) send_list[i] = 0;
+-
+-  //
+-  //  first post receives, these are immediate receives
+-  //  Do not wait for result to come, will do that at the
+-  //  wait call below.
+-  //
+-  int MPI_MY_TAG = 99;
+-  
+-  MPI_Request * request = new MPI_Request[max_num_messages];
+-  for (i = 0; i < num_send_neighbors; i++) 
+-    {
+-      MPI_Irecv(tmp_buffer+i, 1, MPI_INT, MPI_ANY_SOURCE, MPI_MY_TAG, 
+-		MPI_COMM_WORLD, request+i);
+-    }
+-
+-  // send messages 
+-
+-  for (i = 0; i < num_recv_neighbors; i++) 
+-      MPI_Send(tmp_buffer+i, 1, MPI_INT, recv_list[i], MPI_MY_TAG, 
+-	       MPI_COMM_WORLD);
+-  ///
+-   // Receive message from each send neighbor to construct 'send_list'.
+-   ///
+-
+-  MPI_Status status;
+-  for (i = 0; i < num_send_neighbors; i++)
+-    {
+-      if ( MPI_Wait(request+i, &status) )
+-	{
+-	  cerr << "MPI_Wait error\n"<<endl;
+-	  exit(-1);
+-	}
+-      send_list[i] = status.MPI_SOURCE;
+-  }
+-
+-
+-
+-  /////////////////////////////////////////////////////////////////////////
+-  ///
+-  //  Compare the two lists. In most cases they should be the same.  
+-  //  However, if they are not then add new entries to the recv list
+-  //  that are in the send list (but not already in the recv list).
+-  ///
+-  /////////////////////////////////////////////////////////////////////////
+-
+-  for (j = 0; j < num_send_neighbors; j++) 
+-    {
+-      int found = 0;
+-      for (i = 0; i < num_recv_neighbors; i++) 
+-	{
+-	  if (recv_list[i] == send_list[j])
+-	    found = 1;
+-	}
+-
+-      if (found == 0) {
+-	if (debug) cout << "Processor " << rank << " of " << size <<
+-		     ": recv_list[" << num_recv_neighbors <<"] = " 
+-			<< send_list[j] << endl;
+-	recv_list[num_recv_neighbors] = send_list[j];
+-	(num_recv_neighbors)++;
+-
+-      }
+-    }
+-
+-  delete [] send_list;
+-  num_send_neighbors = num_recv_neighbors;
+-
+-  if (num_send_neighbors > max_num_messages)
+-    {
+-      cerr << "Must increase max_external in HPC_Sparse_Matrix.hpp"
+-	   <<endl;
+-      abort();
+-    }
+-
+-  /////////////////////////////////////////////////////////////////////////
+-  /// Start filling HPC_Sparse_Matrix struct
+-  /////////////////////////////////////////////////////////////////////////
+-
+-  A->total_to_be_sent = total_to_be_sent;
+-  int * elements_to_send = new int[total_to_be_sent];
+-  A->elements_to_send = elements_to_send;
+-
+-  for (i = 0 ; i < total_to_be_sent; i++ ) elements_to_send[i] = 0;
+-  
+-  //
+-  // Create 'new_external' which explicitly put the external elements in the
+-  // order given by 'external_local_index'
+-  //
+-
+-  int * new_external = new int[num_external];
+-  for (i = 0; i < num_external; i++) {
+-    new_external[external_local_index[i] - local_nrow] = external_index[i];
+-  }
+-
+-  /////////////////////////////////////////////////////////////////////////
+-  //
+-  // Send each processor the global index list of the external elements in the
+-  // order that I will want to receive them when updating my external elements
+-  //
+-  /////////////////////////////////////////////////////////////////////////
+-
+-  int * lengths = new int[num_recv_neighbors];
+-
+-  MPI_MY_TAG++;
+-
+-  // First post receives
+-
+-  for (i = 0; i < num_recv_neighbors; i++) 
+-    {
+-      int partner    = recv_list[i];
+-      MPI_Irecv(lengths+i, 1, MPI_INT, partner, MPI_MY_TAG, MPI_COMM_WORLD, 
+-		request+i);
+-    }
+-
+-  int * neighbors = new int[max_num_neighbors];
+-  int * recv_length = new int[max_num_neighbors];		
+-  int * send_length = new int[max_num_neighbors];
+-
+-  A->neighbors = neighbors;
+-  A->recv_length = recv_length;
+-  A->send_length = send_length;
+-
+-  j = 0;
+-  for (i = 0; i < num_recv_neighbors; i++) 
+-    {
+-      int start  = j;
+-      int newlength = 0;
+-
+-      // go through list of external elements until updating 
+-      // processor changes
+-
+-      while ((j < num_external) && 
+-	     (new_external_processor[j] == recv_list[i])) 
+-	{
+-	  newlength++;
+-	  j++;
+-	  if (j == num_external) break;
+-	}
+-
+-      recv_length[i] = newlength;
+-      neighbors[i]  = recv_list[i];
+-      
+-      length = j - start;
+-      MPI_Send(&length, 1, MPI_INT, recv_list[i], MPI_MY_TAG, MPI_COMM_WORLD);
+-    }
+-
+-  // Complete the receives of the number of externals
+-
+-  for (i = 0; i < num_recv_neighbors; i++)
+-    {
+-      if ( MPI_Wait(request+i, &status) ) 
+-	{
+-	  cerr << "MPI_Wait error\n"<<endl;
+-	  exit(-1);
+-	}
+-      send_length[i] = lengths[i];
+-    }
+-  delete [] lengths;
+-
+-
+-  ///////////////////////////////////////////////////////////////////
+-  // Build "elements_to_send" list.  These are the x elements I own
+-  // that need to be sent to other processors.
+-  ///////////////////////////////////////////////////////////////////
+-
+-  MPI_MY_TAG++;
+-
+-  j = 0;
+-  for (i = 0; i < num_recv_neighbors; i++)
+-    {
+-      MPI_Irecv(elements_to_send+j, send_length[i], MPI_INT, neighbors[i], 
+-		MPI_MY_TAG, MPI_COMM_WORLD, request+i);
+-      j += send_length[i];
+-    }
+-
+-  j = 0;
+-  for (i = 0; i < num_recv_neighbors; i++) 
+-    {
+-      int start  = j;
+-      int newlength = 0;
+-      
+-      // Go through list of external elements 
+-      // until updating processor changes.  This is redundant, but 
+-      // saves us from recording this information.
+-
+-      while ((j < num_external) && 
+-	     (new_external_processor[j] == recv_list[i])) {
+-	
+-	newlength++;
+-	j++;
+-	if (j == num_external) break;
+-      }
+-      MPI_Send(new_external+start, j-start, MPI_INT, recv_list[i], 
+-	       MPI_MY_TAG, MPI_COMM_WORLD);
+-    }
+-
+-  // receive from each neighbor the global index list of external elements
+-
+-  for (i = 0; i < num_recv_neighbors; i++) 
+-    {
+-      if ( MPI_Wait(request+i, &status) ) 
+-	{
+-	  cerr << "MPI_Wait error\n"<<endl;
+-	  exit(-1);
+-	}
+-  }
+-
+-  /// replace global indices by local indices ///
+-
+-  for (i = 0; i < total_to_be_sent; i++) elements_to_send[i] -= start_row;
+-
+-
+-  ////////////////
+-  // Finish up !!
+-  ////////////////
+-
+-  A->num_send_neighbors = num_send_neighbors;
+-  A->local_ncol = A->local_nrow + num_external;
+-
+-  //Used in exchange_externals
+-  double *send_buffer = new double[total_to_be_sent];
+-  A->send_buffer = send_buffer;
+-
+-  delete [] tmp_buffer;
+-  delete [] global_index_offsets;
+-  delete [] recv_list;
+-  delete [] external_processor;
+-  delete [] new_external;
+-  delete [] new_external_processor;
+-  delete [] request;
+-
+-  return;
+-}
+-#endif // USING_MPI
+diff -Naur ../original_src/HPCCG/make_local_matrix.hpp HPCCG/make_local_matrix.hpp
+--- ../original_src/HPCCG/make_local_matrix.hpp	2021-07-27 19:36:39.238220000 -0700
++++ HPCCG/make_local_matrix.hpp	1969-12-31 16:00:00.000000000 -0800
+@@ -1,49 +0,0 @@
+-
+-//@HEADER
+-// ************************************************************************
+-// 
+-//               HPCCG: Simple Conjugate Gradient Benchmark Code
+-//                 Copyright (2006) Sandia Corporation
+-// 
+-// Under terms of Contract DE-AC04-94AL85000, there is a non-exclusive
+-// license for use of this work by or on behalf of the U.S. Government.
+-// 
+-// BSD 3-Clause License
+-// 
+-// Redistribution and use in source and binary forms, with or without
+-// modification, are permitted provided that the following conditions are met:
+-// 
+-// * Redistributions of source code must retain the above copyright notice, this
+-//   list of conditions and the following disclaimer.
+-// 
+-// * Redistributions in binary form must reproduce the above copyright notice,
+-//   this list of conditions and the following disclaimer in the documentation
+-//   and/or other materials provided with the distribution.
+-// 
+-// * Neither the name of the copyright holder nor the names of its
+-//   contributors may be used to endorse or promote products derived from
+-//   this software without specific prior written permission.
+-// 
+-// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+-// AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+-// IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+-// DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+-// FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+-// DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+-// SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+-// CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+-// OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+-// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+-// 
+-// Questions? Contact Michael A. Heroux (maherou@sandia.gov) 
+-// 
+-// ************************************************************************
+-//@HEADER
+-#ifndef MAKE_LOCAL_MATRIX_H
+-#define MAKE_LOCAL_MATRIX_H
+-#ifdef USING_MPI
+-#include <mpi.h>
+-#endif
+-#include "HPC_Sparse_Matrix.hpp"
+-void make_local_matrix(HPC_Sparse_Matrix *A);
+-#endif
+diff -Naur ../original_src/HPCCG/mytimer.cpp HPCCG/mytimer.cpp
+--- ../original_src/HPCCG/mytimer.cpp	2021-07-27 19:36:39.242262000 -0700
++++ HPCCG/mytimer.cpp	1969-12-31 16:00:00.000000000 -0800
+@@ -1,121 +0,0 @@
+-
+-//@HEADER
+-// ************************************************************************
+-// 
+-//               HPCCG: Simple Conjugate Gradient Benchmark Code
+-//                 Copyright (2006) Sandia Corporation
+-// 
+-// Under terms of Contract DE-AC04-94AL85000, there is a non-exclusive
+-// license for use of this work by or on behalf of the U.S. Government.
+-// 
+-// BSD 3-Clause License
+-// 
+-// Redistribution and use in source and binary forms, with or without
+-// modification, are permitted provided that the following conditions are met:
+-// 
+-// * Redistributions of source code must retain the above copyright notice, this
+-//   list of conditions and the following disclaimer.
+-// 
+-// * Redistributions in binary form must reproduce the above copyright notice,
+-//   this list of conditions and the following disclaimer in the documentation
+-//   and/or other materials provided with the distribution.
+-// 
+-// * Neither the name of the copyright holder nor the names of its
+-//   contributors may be used to endorse or promote products derived from
+-//   this software without specific prior written permission.
+-// 
+-// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+-// AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+-// IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+-// DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+-// FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+-// DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+-// SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+-// CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+-// OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+-// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+-// 
+-// Questions? Contact Michael A. Heroux (maherou@sandia.gov) 
+-// 
+-// ************************************************************************
+-//@HEADER
+-/////////////////////////////////////////////////////////////////////////
+-
+-// Function to return time in seconds.
+-// If compiled with no flags, return CPU time (user and system).
+-// If compiled with -DWALL, returns elapsed time.
+-
+-/////////////////////////////////////////////////////////////////////////
+-#ifdef USING_MPI
+-#include <mpi.h> // If this routine is compiled with -DUSING_MPI
+-                 // then include mpi.h
+-double mytimer(void)
+-{
+-   return(MPI_Wtime());
+-}
+-
+-
+-#elif defined(UseClock)
+-
+-#include <time.hpp>
+-double mytimer(void)
+-{
+-   clock_t t1;
+-   static clock_t t0=0;
+-   static double CPS = CLOCKS_PER_SEC;
+-   double d;
+-
+-   if (t0 == 0) t0 = clock();
+-   t1 = clock() - t0;
+-   d = t1 / CPS;
+-   return(d);
+-}
+-
+-#elif defined(WALL)
+-
+-#include <cstdlib>
+-#include <sys/time.h>
+-#include <sys/resource.h>
+-double mytimer(void)
+-{
+-   struct timeval tp;
+-   static long start=0, startu;
+-   if (!start)
+-   {
+-      gettimeofday(&tp, NULL);
+-      start = tp.tv_sec;
+-      startu = tp.tv_usec;
+-      return(0.0);
+-   }
+-   gettimeofday(&tp, NULL);
+-   return( ((double) (tp.tv_sec - start)) + (tp.tv_usec-startu)/1000000.0 );
+-}
+-
+-#elif defined(UseTimes)
+-
+-#include <cstdlib>
+-#include <sys/times.h>
+-#include <unistd.h>
+-double mytimer(void)
+-{
+-   struct tms ts;
+-   static double ClockTick=0.0;
+-
+-   if (ClockTick == 0.0) ClockTick = (double) sysconf(_SC_CLK_TCK);
+-   times(&ts);
+-   return( (double) ts.tms_utime / ClockTick );
+-}
+-
+-#else
+-
+-#include <cstdlib>
+-#include <sys/time.h>
+-#include <sys/resource.h>
+-double mytimer(void)
+-{
+-   struct rusage ruse;
+-   getrusage(RUSAGE_SELF, &ruse);
+-   return( (double)(ruse.ru_utime.tv_sec+ruse.ru_utime.tv_usec / 1000000.0) );
+-}
+-
+-#endif
+diff -Naur ../original_src/HPCCG/mytimer.hpp HPCCG/mytimer.hpp
+--- ../original_src/HPCCG/mytimer.hpp	2021-07-27 19:36:39.246286000 -0700
++++ HPCCG/mytimer.hpp	1969-12-31 16:00:00.000000000 -0800
+@@ -1,45 +0,0 @@
+-
+-//@HEADER
+-// ************************************************************************
+-// 
+-//               HPCCG: Simple Conjugate Gradient Benchmark Code
+-//                 Copyright (2006) Sandia Corporation
+-// 
+-// Under terms of Contract DE-AC04-94AL85000, there is a non-exclusive
+-// license for use of this work by or on behalf of the U.S. Government.
+-// 
+-// BSD 3-Clause License
+-// 
+-// Redistribution and use in source and binary forms, with or without
+-// modification, are permitted provided that the following conditions are met:
+-// 
+-// * Redistributions of source code must retain the above copyright notice, this
+-//   list of conditions and the following disclaimer.
+-// 
+-// * Redistributions in binary form must reproduce the above copyright notice,
+-//   this list of conditions and the following disclaimer in the documentation
+-//   and/or other materials provided with the distribution.
+-// 
+-// * Neither the name of the copyright holder nor the names of its
+-//   contributors may be used to endorse or promote products derived from
+-//   this software without specific prior written permission.
+-// 
+-// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+-// AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+-// IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+-// DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+-// FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+-// DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+-// SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+-// CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+-// OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+-// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+-// 
+-// Questions? Contact Michael A. Heroux (maherou@sandia.gov) 
+-// 
+-// ************************************************************************
+-//@HEADER
+-#ifndef MYTIMER_H
+-#define MYTIMER_H
+-double mytimer(void);
+-#endif // MYTIMER_H
+diff -Naur ../original_src/HPCCG/read_HPC_row.cpp HPCCG/read_HPC_row.cpp
+--- ../original_src/HPCCG/read_HPC_row.cpp	2021-07-27 19:36:39.250243000 -0700
++++ HPCCG/read_HPC_row.cpp	1969-12-31 16:00:00.000000000 -0800
+@@ -1,215 +0,0 @@
+-
+-//@HEADER
+-// ************************************************************************
+-// 
+-//               HPCCG: Simple Conjugate Gradient Benchmark Code
+-//                 Copyright (2006) Sandia Corporation
+-// 
+-// Under terms of Contract DE-AC04-94AL85000, there is a non-exclusive
+-// license for use of this work by or on behalf of the U.S. Government.
+-// 
+-// BSD 3-Clause License
+-// 
+-// Redistribution and use in source and binary forms, with or without
+-// modification, are permitted provided that the following conditions are met:
+-// 
+-// * Redistributions of source code must retain the above copyright notice, this
+-//   list of conditions and the following disclaimer.
+-// 
+-// * Redistributions in binary form must reproduce the above copyright notice,
+-//   this list of conditions and the following disclaimer in the documentation
+-//   and/or other materials provided with the distribution.
+-// 
+-// * Neither the name of the copyright holder nor the names of its
+-//   contributors may be used to endorse or promote products derived from
+-//   this software without specific prior written permission.
+-// 
+-// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+-// AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+-// IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+-// DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+-// FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+-// DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+-// SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+-// CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+-// OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+-// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+-// 
+-// Questions? Contact Michael A. Heroux (maherou@sandia.gov) 
+-// 
+-// ************************************************************************
+-//@HEADER
+-/////////////////////////////////////////////////////////////////////////
+-
+-// Routine to read a sparse matrix, right hand side, initial guess, 
+-// and exact solution (as computed by a direct solver).
+-
+-/////////////////////////////////////////////////////////////////////////
+-
+-// nrow - number of rows of matrix (on this processor)
+-
+-#include <iostream>
+-using std::cout;
+-using std::cerr;
+-using std::endl;
+-#include <cstdlib>
+-#include <cstdio>
+-#include <cassert>
+-#include "read_HPC_row.hpp"
+-void read_HPC_row(char *data_file, HPC_Sparse_Matrix **A,
+-		  double **x, double **b, double **xexact)
+-
+-{
+-  FILE *in_file ;
+-
+-  int i,j;
+-  int total_nrow;
+-  long long total_nnz;
+-  int l;
+-  int * lp = &l;
+-  double v;
+-  double * vp = &v;
+-#ifdef DEBUG
+-  int debug = 1;
+-#else
+-  int debug = 0;
+-#endif
+-
+-  printf("Reading matrix info from %s...\n",data_file);
+-  
+-  in_file = fopen( data_file, "r");
+-  if (in_file == NULL)
+-    {
+-      printf("Error: Cannot open file: %s\n",data_file);
+-      exit(1);
+-    }
+-
+-  fscanf(in_file,"%d",&total_nrow);
+-  fscanf(in_file,"%lld",&total_nnz);
+-#ifdef USING_MPI
+-  int size, rank; // Number of MPI processes, My process ID
+-  MPI_Comm_size(MPI_COMM_WORLD, &size);
+-  MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+-#else
+-  int size = 1; // Serial case (not using MPI)
+-  int rank = 0;
+-#endif
+-  int n = total_nrow;
+-  int chunksize = n/size;
+-  int remainder = n%size;
+-
+-  int mp = chunksize;
+-  if (rank<remainder) mp++;
+-  int local_nrow = mp;
+-  
+-  int off = rank*(chunksize+1);
+-  if (rank>remainder) off -= (rank - remainder);
+-  int start_row = off;
+-  int stop_row = off + mp -1;
+-  
+-
+-  // Allocate arrays that are of length local_nrow
+-  int *nnz_in_row = new int[local_nrow];
+-  double **ptr_to_vals_in_row = new double*[local_nrow];
+-  int    **ptr_to_inds_in_row = new int   *[local_nrow];
+-  double **ptr_to_diags       = new double*[local_nrow];
+-
+-  *x = new double[local_nrow];
+-  *b = new double[local_nrow];
+-  *xexact = new double[local_nrow];
+-
+-  // Find nnz for this processor
+-  int local_nnz = 0;
+-  int cur_local_row = 0;
+-
+-  for (i=0; i<total_nrow; i++)
+-    {
+-      fscanf(in_file, "%d",lp); /* row #, nnz in row */
+-      if (start_row <=i && i <= stop_row) // See if nnz for row should be added
+-	{
+-	  local_nnz += l;
+-	  nnz_in_row[cur_local_row] = l;
+-	  cur_local_row++;
+-	}
+-    }
+-  assert(cur_local_row==local_nrow); // cur_local_row should equal local_nrow
+-
+-
+-  // Allocate arrays that are of length local_nnz
+-  double *list_of_vals = new double[local_nnz];
+-  int *list_of_inds = new int   [local_nnz];
+-
+-  // Define pointers into list_of_vals/inds 
+-  ptr_to_vals_in_row[0] = list_of_vals;
+-  ptr_to_inds_in_row[0] = list_of_inds;
+-  for (i=1; i<local_nrow; i++)
+-    {
+-      ptr_to_vals_in_row[i] = ptr_to_vals_in_row[i-1]+nnz_in_row[i-1];
+-      ptr_to_inds_in_row[i] = ptr_to_inds_in_row[i-1]+nnz_in_row[i-1];
+-    }
+-
+-  cur_local_row = 0;
+-  for (i=0; i<total_nrow; i++)
+-    {
+-      int cur_nnz;
+-      fscanf(in_file, "%d",&cur_nnz);
+-      if (start_row <=i && i <= stop_row) // See if nnz for row should be added
+-	{
+-	  if (debug) cout << "Process "<<rank
+-			  <<" of "<<size<<" getting row "<<i<<endl;
+-	  for (j=0; j<cur_nnz; j++) 
+-	    {
+-	      fscanf(in_file, "%lf %d",vp,lp);
+-	      ptr_to_vals_in_row[cur_local_row][j] = v;
+-	      ptr_to_inds_in_row[cur_local_row][j] = l;
+-	    }
+-	      cur_local_row++;
+-	}
+-      else
+-	for (j=0; j<cur_nnz; j++) fscanf(in_file, "%lf %d",vp,lp);
+-    }
+-
+-  
+-  cur_local_row = 0;
+-  double xt, bt, xxt;
+-  for (i=0; i<total_nrow; i++) 
+-    {
+-      if (start_row <=i && i <= stop_row) // See if entry should be added
+-	{
+-	  if (debug) cout << "Process "<<rank<<" of "
+-                       <<size<<" getting RHS "<<i<<endl;
+-	  fscanf(in_file, "%lf %lf %lf",&xt, &bt, &xxt);
+-	  (*x)[cur_local_row] = xt;
+-	  (*b)[cur_local_row] = bt;
+-	  (*xexact)[cur_local_row] = xxt;
+-	  cur_local_row++;
+-	}
+-      else
+-	fscanf(in_file, "%lf %lf %lf",vp, vp, vp); // or thrown away
+-    }
+-
+-  fclose(in_file);
+-  if (debug) cout << "Process "<<rank<<" of "<<size<<" has "<<local_nrow;
+-
+-  if (debug) cout << " rows. Global rows "<< start_row
+-		  <<" through "<< stop_row <<endl;
+-
+-  if (debug) cout << "Process "<<rank<<" of "<<size
+-		  <<" has "<<local_nnz<<" nonzeros."<<endl;
+-
+-  *A = new HPC_Sparse_Matrix; // Allocate matrix struct and fill it
+-  (*A)->title = 0;
+-  (*A)->start_row = start_row ; 
+-  (*A)->stop_row = stop_row;
+-  (*A)->total_nrow = total_nrow;
+-  (*A)->total_nnz = total_nnz;
+-  (*A)->local_nrow = local_nrow;
+-  (*A)->local_ncol = local_nrow;
+-  (*A)->local_nnz = local_nnz;
+-  (*A)->nnz_in_row = nnz_in_row;
+-  (*A)->ptr_to_vals_in_row = ptr_to_vals_in_row;
+-  (*A)->ptr_to_inds_in_row = ptr_to_inds_in_row;
+-  (*A)-> ptr_to_diags = ptr_to_diags;
+-
+-  return;
+-}
+diff -Naur ../original_src/HPCCG/read_HPC_row.hpp HPCCG/read_HPC_row.hpp
+--- ../original_src/HPCCG/read_HPC_row.hpp	2021-07-27 19:36:39.255261000 -0700
++++ HPCCG/read_HPC_row.hpp	1969-12-31 16:00:00.000000000 -0800
+@@ -1,51 +0,0 @@
+-
+-//@HEADER
+-// ************************************************************************
+-// 
+-//               HPCCG: Simple Conjugate Gradient Benchmark Code
+-//                 Copyright (2006) Sandia Corporation
+-// 
+-// Under terms of Contract DE-AC04-94AL85000, there is a non-exclusive
+-// license for use of this work by or on behalf of the U.S. Government.
+-// 
+-// BSD 3-Clause License
+-// 
+-// Redistribution and use in source and binary forms, with or without
+-// modification, are permitted provided that the following conditions are met:
+-// 
+-// * Redistributions of source code must retain the above copyright notice, this
+-//   list of conditions and the following disclaimer.
+-// 
+-// * Redistributions in binary form must reproduce the above copyright notice,
+-//   this list of conditions and the following disclaimer in the documentation
+-//   and/or other materials provided with the distribution.
+-// 
+-// * Neither the name of the copyright holder nor the names of its
+-//   contributors may be used to endorse or promote products derived from
+-//   this software without specific prior written permission.
+-// 
+-// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+-// AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+-// IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+-// DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+-// FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+-// DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+-// SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+-// CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+-// OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+-// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+-// 
+-// Questions? Contact Michael A. Heroux (maherou@sandia.gov) 
+-// 
+-// ************************************************************************
+-//@HEADER
+-#ifndef READ_HPC_ROW_H
+-#define READ_HPC_ROW_H
+-#ifdef USING_MPI
+-#include <mpi.h>
+-#endif
+-#include "HPC_Sparse_Matrix.hpp"
+-
+-void read_HPC_row(char *data_file, HPC_Sparse_Matrix **A,
+-		  double **x, double **b, double **xexact);
+-#endif
+diff -Naur ../original_src/HPCCG/strongScalingRunScript HPCCG/strongScalingRunScript
+--- ../original_src/HPCCG/strongScalingRunScript	2021-07-27 19:36:39.260246000 -0700
++++ HPCCG/strongScalingRunScript	1969-12-31 16:00:00.000000000 -0800
+@@ -1,12 +0,0 @@
+-# These commands will run the HPCCG executable on 1-64 processors at powers
+-# of 2 and change the problem size so that the same global problem is
+-# being solved regardless of processor count.  This is sometimes referred
+-# to as "strong scaling".
+-
+-mpirun -np 1 test_HPCCG 64 64 1024 > strongOut_01
+-mpirun -np 2 test_HPCCG 64 64 512 > strongOut_02
+-mpirun -np 4 test_HPCCG 64 64 256 > strongOut_04
+-mpirun -np 8 test_HPCCG 64 64 128 > strongOut_08
+-mpirun -np 16 test_HPCCG 64 64 64 > strongOut_16
+-mpirun -np 32 test_HPCCG 64 64 32 > strongOut_32
+-mpirun -np 64 test_HPCCG 64 64 16 > strongOut_64
+diff -Naur ../original_src/HPCCG/waxpby.cpp HPCCG/waxpby.cpp
+--- ../original_src/HPCCG/waxpby.cpp	2021-07-27 19:36:39.264240000 -0700
++++ HPCCG/waxpby.cpp	1969-12-31 16:00:00.000000000 -0800
+@@ -1,85 +0,0 @@
+-
+-//@HEADER
+-// ************************************************************************
+-// 
+-//               HPCCG: Simple Conjugate Gradient Benchmark Code
+-//                 Copyright (2006) Sandia Corporation
+-// 
+-// Under terms of Contract DE-AC04-94AL85000, there is a non-exclusive
+-// license for use of this work by or on behalf of the U.S. Government.
+-// 
+-// BSD 3-Clause License
+-// 
+-// Redistribution and use in source and binary forms, with or without
+-// modification, are permitted provided that the following conditions are met:
+-// 
+-// * Redistributions of source code must retain the above copyright notice, this
+-//   list of conditions and the following disclaimer.
+-// 
+-// * Redistributions in binary form must reproduce the above copyright notice,
+-//   this list of conditions and the following disclaimer in the documentation
+-//   and/or other materials provided with the distribution.
+-// 
+-// * Neither the name of the copyright holder nor the names of its
+-//   contributors may be used to endorse or promote products derived from
+-//   this software without specific prior written permission.
+-// 
+-// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+-// AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+-// IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+-// DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+-// FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+-// DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+-// SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+-// CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+-// OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+-// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+-// 
+-// Questions? Contact Michael A. Heroux (maherou@sandia.gov) 
+-// 
+-// ************************************************************************
+-//@HEADER
+-/////////////////////////////////////////////////////////////////////////
+-
+-// Routine to compute the update of a vector with the sum of two 
+-// scaled vectors where:
+-
+-// w = alpha*x + beta*y
+-
+-// n - number of vector elements (on this processor)
+-
+-// x, y - input vectors
+-
+-// alpha, beta - scalars applied to x and y respectively.
+-
+-// w - output vector.
+-
+-/////////////////////////////////////////////////////////////////////////
+-
+-#include "waxpby.hpp"
+-
+-int waxpby (const int n, const double alpha, const double * const x, 
+-	    const double beta, const double * const y, 
+-		     double * const w)
+-{  
+-  if (alpha==1.0) {
+-#ifdef USING_OMP
+-#pragma omp parallel for
+-#endif
+-    for (int i=0; i<n; i++) w[i] = x[i] + beta * y[i];
+-  }
+-  else if(beta==1.0) {
+-#ifdef USING_OMP
+-#pragma omp parallel for
+-#endif
+-    for (int i=0; i<n; i++) w[i] = alpha * x[i] + y[i];
+-  }
+-  else {
+-#ifdef USING_OMP
+-#pragma omp parallel for
+-#endif
+-    for (int i=0; i<n; i++) w[i] = alpha * x[i] + beta * y[i];
+-  }
+-
+-  return(0);
+-}
+diff -Naur ../original_src/HPCCG/waxpby.hpp HPCCG/waxpby.hpp
+--- ../original_src/HPCCG/waxpby.hpp	2021-07-27 19:36:39.269265000 -0700
++++ HPCCG/waxpby.hpp	1969-12-31 16:00:00.000000000 -0800
+@@ -1,45 +0,0 @@
+-
+-//@HEADER
+-// ************************************************************************
+-// 
+-//               HPCCG: Simple Conjugate Gradient Benchmark Code
+-//                 Copyright (2006) Sandia Corporation
+-// 
+-// Under terms of Contract DE-AC04-94AL85000, there is a non-exclusive
+-// license for use of this work by or on behalf of the U.S. Government.
+-// 
+-// BSD 3-Clause License
+-// 
+-// Redistribution and use in source and binary forms, with or without
+-// modification, are permitted provided that the following conditions are met:
+-// 
+-// * Redistributions of source code must retain the above copyright notice, this
+-//   list of conditions and the following disclaimer.
+-// 
+-// * Redistributions in binary form must reproduce the above copyright notice,
+-//   this list of conditions and the following disclaimer in the documentation
+-//   and/or other materials provided with the distribution.
+-// 
+-// * Neither the name of the copyright holder nor the names of its
+-//   contributors may be used to endorse or promote products derived from
+-//   this software without specific prior written permission.
+-// 
+-// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+-// AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+-// IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+-// DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+-// FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+-// DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+-// SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+-// CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+-// OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+-// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+-// 
+-// Questions? Contact Michael A. Heroux (maherou@sandia.gov) 
+-// 
+-// ************************************************************************
+-//@HEADER
+-
+-int waxpby (const int n, const double alpha, const double * const x, 
+-	    const double beta, const double * const y, 
+-		     double * const w);
+diff -Naur ../original_src/HPCCG/weakScalingRunScript HPCCG/weakScalingRunScript
+--- ../original_src/HPCCG/weakScalingRunScript	2021-07-27 19:36:39.274244000 -0700
++++ HPCCG/weakScalingRunScript	1969-12-31 16:00:00.000000000 -0800
+@@ -1,11 +0,0 @@
+-# These commands will run the HPCCG executable on 1-64 processors at powers
+-# of 2 and change the problem size so that the same local problem size is
+-# being solved regardless of processor count.  This is sometimes referred
+-# to as "weak scaling".
+-
+-mpirun -np 1 test_HPCCG 64 64 64 > weakOut_01
+-mpirun -np 2 test_HPCCG 64 64 64 > weakOut_02
+-mpirun -np 4 test_HPCCG 64 64 64 > weakOut_04
+-mpirun -np 8 test_HPCCG 64 64 64 > weakOut_08
+-mpirun -np 16 test_HPCCG 64 64 64 > weakOut_16
+-mpirun -np 64 test_HPCCG 64 64 64 > weakOut_64

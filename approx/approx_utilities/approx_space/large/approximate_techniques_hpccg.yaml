@@ -1,0 +1,81 @@
+TAF:
+    clause: "memo(out)"
+    exports: {
+        PREDICTION_SIZE: {
+            type: "int",
+            range: [2, 8, 2]
+        },
+        HISTORY_SIZE: {
+            type: "int",
+            range: [2, 5, 1]
+        },
+        THRESHOLD: {
+            type: "float",
+            range: [0.1, 3.0, 0.3]
+        }
+    }
+
+fPerfo:
+    clause: "perfo(fini:)"
+    exports: {
+        PERFO_RATE: {
+            type: "float",
+            range: [0.1, 1.0, 0.1]
+        }
+    }
+
+iPerfo:
+    clause: "perfo(init:)"
+    exports: {
+        PERFO_RATE: {
+            type: "float",
+            range: [0.1, 1.0, 0.1]
+        }
+    }
+
+rPerfo:
+    clause: "perfo(rand:)"
+    exports: {
+        PERFO_RATE: {
+            type: "float",
+            range: [0.1, 1.0, 0.1]
+        }
+    }
+
+lPerfo:
+    clause: "perfo(large:)"
+    exports: {
+        PERFO_STEP: {
+            type: "int",
+            progression: "geometric",
+            range: [2, 16, 2]
+        }
+    }
+
+sPerfo:
+    clause: "perfo(small:)"
+    exports: {
+        PERFO_STEP: {
+            type: "int",
+            progression: "geometric",
+            range: [2, 16, 2]
+        }
+    }
+
+iACT:
+    clause: "memo(in)"
+    exports: {
+        THRESHOLD: {
+            type: "float",
+            range: [0.5, 6, 0.5]
+        },
+        TABLE_SIZE: {
+            type: "int",
+            range: [5, 30, 5]
+        }
+
+    }
+
+accurate:
+    clause: None
+    exports: {}
