@@ -1,5 +1,17 @@
-#ifndef LLNL_LOOPS_DATA_UTILS
-#define LLNL_LOOPS_DATA_UTILS
+//===--- datautils.hpp - allocation utilities with mixed prec data  ----------------------===//
+//
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+//
+//===----------------------------------------------------------------------===//
+/// \file
+/// This files is an allocation layer utility file
+///
+//===----------------------------------------------------------------------===//
+
+#ifndef _LOOPS_DATA_UTILS_
+#define _LOOPS_DATA_UTILS_
 #include <stdlib.h>
 
 #include "IO.hpp"

@@ -1,3 +1,15 @@
+//===--- approx_internal.h -  data types used by the approximate runtime system ----------------------===//
+//
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+//
+//===----------------------------------------------------------------------===//
+/// \file
+/// This file defines datatypes used by the compiler to communicate information to the runtime system
+///
+//===----------------------------------------------------------------------===//
+
 #ifndef __APPROX_INTERNAL__
 #define __APPROX_INTERNAL__
 #ifdef __cplusplus
