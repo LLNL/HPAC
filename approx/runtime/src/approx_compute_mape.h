@@ -1,3 +1,15 @@
+//===--- approx_compute_map.h -  compute statistics of approximate execution ----------------------===//
+//
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+//
+//===----------------------------------------------------------------------===//
+/// \file
+/// This files computes the MAPE between accurate and approximate executions 
+///
+//===----------------------------------------------------------------------===//
+
 #ifndef __APPROX_COMPUTE_MAPE__
 #define __APPROX_COMPUTE_MAPE__
 

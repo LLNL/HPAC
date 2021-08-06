@@ -1,4 +1,16 @@
-#!/g/g90/koparasy/spack/opt/spack/linux-rhel7-broadwell/gcc-4.9.3/python-3.7.6-inv25xvobx4ems4b7gouirpb5snyuipa/bin/python3.7
+#!/usr/bin/env python3
+#
+# Copyright 2020 Lawrence Livermore National Security, LLC
+# and project developers
+#
+# LLNL release number LLNL-CODE-XXXXXX
+#
+# Author: Konstantinos Parasyris, parasyris1@lln.gov
+#
+# SPDX-License-Identifier: "Apache-2.0 WITH LLVM-exception"
+#
+# See top-level files LICENSE and NOTICE for details.
+#
 
 import sys
 import re

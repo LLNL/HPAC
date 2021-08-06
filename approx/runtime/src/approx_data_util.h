@@ -1,3 +1,16 @@
+//===--- approx_data_util.h -  performs operations on opaque data types ----------------------===//
+//
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+//
+//===----------------------------------------------------------------------===//
+/// \file
+/// This files performs operations on opaque data types 
+///
+//===----------------------------------------------------------------------===//
+
+
 #ifndef __APPROX_DATA_UTIL__
 #define __APPROX_DATA_UTIL__
 

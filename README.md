@@ -40,7 +40,6 @@ To build the HPAC compiler and all the infrastructure please execute the followi
 ```bash
 git clone git@github.com:koparasy/HPAC.git
 cd HPAC
-git checkout sc-dev 
 ./setup.sh 'PREFIX' 'NUM THREADS' 
 ```
 
@@ -132,3 +131,28 @@ A figure called 'blackscholes_figure2.pdf' should be stored under the 'sc_paper_
 is similar to Figure 2 of the paper submission.
 
 
+## Contributing
+To contribute to this repo please send a [pull
+request](https://help.github.com/articles/using-pull-requests/) on the
+develop branch of this repo.
+
+## Authors
+
+This code was created by Konstantinos Parasyris (parasyris1@llnl.gov) and Giorgis Georgakoudis,
+(georgakoudis1@llnl.gov), assisted with design input from Harshitha Menon (gopalakrishn1@llnl.gov).
+
+
+## License
+
+This repo is distributed under the terms of the Apache License (Version
+2.0) with LLVM exceptions. Other software that is part of this
+repository may be under a different license, documented by the file
+LICENSE in its sub-directory.
+
+All new contributions to this repo must be under the Apache License (Version 2.0) with LLVM exceptions.
+
+See files [LICENSE](LICENSE) and [NOTICE](NOTICE) for more information.
+
+SPDX License Identifier: "Apache-2.0 WITH LLVM-exception"
+
+LLNL-CODE- 825539

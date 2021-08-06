@@ -1,4 +1,17 @@
 #!/usr/bin/env python3
+#
+# Copyright 2020 Lawrence Livermore National Security, LLC
+# and project developers
+#
+# LLNL release number LLNL-CODE-XXXXXX
+#
+# Author: Konstantinos Parasyris, parasyris1@lln.gov
+#
+# SPDX-License-Identifier: "Apache-2.0 WITH LLVM-exception"
+#
+# See top-level files LICENSE and NOTICE for details.
+#
+
 import os
 import subprocess
 import sys

@@ -1,3 +1,15 @@
+//===--- approx_memoize_out.cpp - runtime implementation of TAF ----------------------===//
+//
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+//
+//===----------------------------------------------------------------------===//
+/// \file
+/// This files is the driver of the TAF approximate memoization 
+///
+//===----------------------------------------------------------------------===//
+//
 #include <cfloat>
 #include <iostream>
 #include <memory>
