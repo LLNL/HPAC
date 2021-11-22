@@ -12,7 +12,7 @@ diff -Naur ../original_src/rodinia_3.1/openmp/particlefilter/CMakeLists.txt part
 +set(SRC_FILES "particlefilter.cpp")
 +set(APP_NAME "pFilter")
 +
-+execute_process(COMMAND python ${CMAKE_SOURCE_DIR}/configure.py 
++execute_process(COMMAND python3 ${CMAKE_SOURCE_DIR}/configure.py 
 +    ${CMAKE_SOURCE_DIR}
 +    ${CMAKE_CURRENT_BINARY_DIR} 
 +    ${CMAKE_CURRENT_SOURCE_DIR} ${APP_NAME} ${SRC_FILES}
