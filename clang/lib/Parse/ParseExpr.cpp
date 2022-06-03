@@ -2005,11 +2005,10 @@ Parser::ParsePostfixExpressionSuffix(ExprResult LHS) {
             LHS = Actions.ActOnApproxArraySectionExpr(LHS.get(), Loc, Idx.get(),
                                                       ColonLocFirstLength.get(), RLoc);
           }else{
-
+            LHS = Actions.ActOnOMPArraySectionExpr(
+                LHS.get(), Loc, ArgExprs.empty() ? nullptr : ArgExprs[0],
+                ColonLocFirst, ColonLocSecond, Length.get(), Stride.get(), RLoc);
           }
-          LHS = Actions.ActOnOMPArraySectionExpr(
-              LHS.get(), Loc, ArgExprs.empty() ? nullptr : ArgExprs[0],
-              ColonLocFirst, ColonLocSecond, Length.get(), Stride.get(), RLoc);
         } else {
           LHS = Actions.ActOnArraySubscriptExpr(getCurScope(), LHS.get(), Loc,
                                                 ArgExprs, RLoc);
