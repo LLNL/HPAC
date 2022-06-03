@@ -34,6 +34,17 @@ static bool isPerfoType(Token &Tok, PerfoType &Kind) {
   return false;
 }
 
+static bool isMemoType(Token &Tok, MemoType &Kind) {
+  for (unsigned i = MT_START; i < MT_END; i++) {
+    enum MemoType MT = (enum MemoType)i;
+    if (Tok.getIdentifierInfo()->getName().equals(ApproxMemoClause::MemoName[MT])) {
+      Kind = MT;
+      return true;
+    }
+  }
+  return false;
+}
+
 bool Parser::ParseApproxVarList(SmallVectorImpl<Expr *> &Vars,
                                 SourceLocation &ELoc) {
   BalancedDelimiterTracker T(*this, tok::l_paren, tok::annot_pragma_approx_end);
@@ -100,9 +111,23 @@ ApproxClause *Parser::ParseApproxPerfoClause(ClauseKind CK) {
 
 ApproxClause *Parser::ParseApproxMemoClause(ClauseKind CK) {
   SourceLocation Loc = Tok.getLocation();
-  SourceLocation ELoc = ConsumeAnyToken();
-  ApproxVarListLocTy Locs(Loc, SourceLocation(), ELoc);
-  return Actions.ActOnApproxMemoClause(CK, Locs);
+  SourceLocation LParenLoc = ConsumeAnyToken();
+  BalancedDelimiterTracker T(*this, tok::l_paren, tok::annot_pragma_approx_end);
+  if (T.expectAndConsume(diag::err_expected_lparen_after, ApproxClause::Name[CK].c_str()))
+    return nullptr;
+
+  MemoType MT;
+  if (!isMemoType(Tok, MT)){
+    return nullptr;
+  }
+  /// Consume Memo Type
+  ConsumeAnyToken();
+
+  SourceLocation ELoc = Tok.getLocation();
+  if (!T.consumeClose())
+    ELoc = T.getCloseLocation();
+  ApproxVarListLocTy Locs(Loc, LParenLoc, ELoc);
+  return Actions.ActOnApproxMemoClause(CK, MT, Locs);
 }
 
 ApproxClause *Parser::ParseApproxDTClause(ClauseKind CK) {
@@ -199,6 +224,8 @@ bool isApproxClause(Token &Tok, ClauseKind &Kind) {
 
 StmtResult Parser::ParseApproxDirective(ParsedStmtContext StmtCtx) {
   assert(Tok.is(tok::annot_pragma_approx_start));
+  /// This should be a function call;
+  inApproxScope = true;
 
 #define PARSER_CALL(method) ((*this).*(method))
 
@@ -218,6 +245,7 @@ StmtResult Parser::ParseApproxDirective(ParsedStmtContext StmtCtx) {
   if (Tok.is(tok::eod) || Tok.is(tok::eof)) {
     PP.Diag(Tok, diag::err_pragma_approx_expected_directive);
     ConsumeAnyToken();
+    inApproxScope = false;
     return Directive;
   }
 
@@ -227,12 +255,14 @@ StmtResult Parser::ParseApproxDirective(ParsedStmtContext StmtCtx) {
       ApproxClause *Clause = PARSER_CALL(ParseApproxClause[CK])(CK);
       if (!Clause) {
         SkipUntil(tok::annot_pragma_approx_end);
+        inApproxScope = false;
         return Directive;
       }
       Clauses.push_back(Clause);
     } else {
       PP.Diag(Tok, diag::err_pragma_approx_unrecognized_directive);
       SkipUntil(tok::annot_pragma_approx_end);
+      inApproxScope = false;
       return Directive;
     }
   }
@@ -246,5 +276,6 @@ StmtResult Parser::ParseApproxDirective(ParsedStmtContext StmtCtx) {
   StmtResult AssociatedStmt = (Sema::CompoundScopeRAII(Actions), ParseStatement());
   AssociatedStmt = Actions.ActOnCapturedRegionEnd(AssociatedStmt.get());
   Directive = Actions.ActOnApproxDirective(AssociatedStmt.get(), Clauses, Locs);
+  inApproxScope = false;
   return Directive;
 }

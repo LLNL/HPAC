@@ -442,6 +442,10 @@ class Parser : public CodeCompletionHandler {
   /// a statement expression and builds a suitable expression statement.
   StmtResult handleExprStmt(ExprResult E, ParsedStmtContext StmtCtx);
 
+  /// inApproxScope - When this is true, we are parsing approximate
+  /// pragmas. By default this value is false.
+  bool inApproxScope;
+
 public:
   Parser(Preprocessor &PP, Sema &Actions, bool SkipFunctionBodies);
   ~Parser() override;

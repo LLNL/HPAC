@@ -12,6 +12,7 @@
 #include "clang/AST/DeclarationName.h"
 #include "clang/AST/DependenceFlags.h"
 #include "clang/AST/Expr.h"
+#include "clang/AST/ExprApprox.h"
 #include "clang/AST/ExprCXX.h"
 #include "clang/AST/ExprConcepts.h"
 #include "clang/AST/ExprObjC.h"
@@ -416,6 +417,15 @@ ExprDependence clang::computeDependence(ObjCIsaExpr *E) {
 
 ExprDependence clang::computeDependence(ObjCIndirectCopyRestoreExpr *E) {
   return E->getSubExpr()->getDependence();
+}
+
+ExprDependence clang::computeDependence(ApproxArraySectionExpr *E) {
+  auto D = E->getBase()->getDependence();
+  if (auto *LB = E->getLowerBound())
+    D |= LB->getDependence();
+  if (auto *Len = E->getLength())
+    D |= Len->getDependence();
+  return D;
 }
 
 ExprDependence clang::computeDependence(OMPArraySectionExpr *E) {

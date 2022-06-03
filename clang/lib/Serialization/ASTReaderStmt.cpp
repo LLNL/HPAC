@@ -23,6 +23,7 @@
 #include "clang/AST/DeclarationName.h"
 #include "clang/AST/DependenceFlags.h"
 #include "clang/AST/Expr.h"
+#include "clang/AST/ExprApprox.h"
 #include "clang/AST/ExprCXX.h"
 #include "clang/AST/ExprObjC.h"
 #include "clang/AST/ExprOpenMP.h"
@@ -940,6 +941,15 @@ void ASTStmtReader::VisitMatrixSubscriptExpr(MatrixSubscriptExpr *E) {
   E->setBase(Record.readSubExpr());
   E->setRowIdx(Record.readSubExpr());
   E->setColumnIdx(Record.readSubExpr());
+  E->setRBracketLoc(readSourceLocation());
+}
+
+void ASTStmtReader::VisitApproxArraySectionExpr(ApproxArraySectionExpr *E) {
+  VisitExpr(E);
+  E->setBase(Record.readSubExpr());
+  E->setLowerBound(Record.readSubExpr());
+  E->setLength(Record.readSubExpr());
+  E->setColonLoc(readSourceLocation());
   E->setRBracketLoc(readSourceLocation());
 }
 
@@ -3007,6 +3017,10 @@ Stmt *ASTReader::ReadStmtFromStream(ModuleFile &F) {
 
     case EXPR_MATRIX_SUBSCRIPT:
       S = new (Context) MatrixSubscriptExpr(Empty);
+      break;
+
+    case EXPR_APPROX_ARRAY_SECTION:
+      S = new (Context) ApproxArraySectionExpr(Empty);
       break;
 
     case EXPR_OMP_ARRAY_SECTION:

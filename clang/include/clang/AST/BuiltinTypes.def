@@ -319,6 +319,9 @@ PLACEHOLDER_TYPE(ARCUnbridgedCast, ARCUnbridgedCastTy)
 // A placeholder type for incomplete matrix index expressions.
 PLACEHOLDER_TYPE(IncompleteMatrixIdx, IncompleteMatrixIdxTy)
 
+// A placeholder type for Approx array sections.
+PLACEHOLDER_TYPE(ApproxArraySection, ApproxArraySectionTy)
+
 // A placeholder type for OpenMP array sections.
 PLACEHOLDER_TYPE(OMPArraySection, OMPArraySectionTy)
 

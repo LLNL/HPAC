@@ -56,6 +56,7 @@ add_clang_library(clangAST
   DeclTemplate.cpp
   ParentMapContext.cpp
   Expr.cpp
+  ExprApprox.cpp
   ExprClassification.cpp
   ExprConcepts.cpp
   ExprConstant.cpp

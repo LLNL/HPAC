@@ -115,6 +115,7 @@ void CodeGenFunction::EmitDecl(const Decl &D) {
       if (cast<EnumDecl>(D).getDefinition())
         DI->EmitAndRetainType(getContext().getEnumType(cast<EnumDecl>(&D)));
     return;
+  case Decl::ApproxCapturedExpr:
   case Decl::Function:     // void X();
   case Decl::EnumConstant: // enum ? { X = ? }
   case Decl::StaticAssert: // static_assert(X, ""); [C++0x]

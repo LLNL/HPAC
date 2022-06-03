@@ -10439,6 +10439,61 @@ let CategoryName = "Approx Issue" in {
 //Approx supoprt
 def err_approx_expected_sema : Error<
   "Error In Sema Analysis">;
+def err_approx_array_section_use : Error<"Approx array section is not allowed here">;
+def err_approx_array_shaping_use : Error<"Approx array shaping operation is not allowed here">;
+def err_approx_iterator_use : Error<"Approx iterator is not allowed here">;
+def err_approx_typecheck_section_value : Error<"subscripted value is not an array or pointer">;
+def warn_approx_section_is_char : Warning<"array section %select{lower bound|length}0 is of type 'char'">,
+  InGroup<CharSubscript>, DefaultIgnore;
+def err_approx_typecheck_section_not_integer : Error<
+  "array section %select{lower bound|length}0 is not an integer">;
+def err_approx_section_function_type : Error<
+  "section of pointer to function type %0">;
+def err_approx_section_incomplete_type : Error<
+  "section of pointer to incomplete type %0">;
+def err_approx_section_not_subset_of_array : Error<
+  "array section must be a subset of the original array">;
+def err_approx_section_length_negative : Error<
+  "section length is evaluated to a negative value %0">;
+def err_approx_section_length_undefined : Error<
+  "section length is unspecified and cannot be inferred because subscripted value is %select{not an array|an array of unknown bound}0">;
+def err_approx_non_pointer_type_array_shaping_base : Error<
+  "expected expression with a pointer to a complete type as a base of an array "
+  "shaping operation">;
+def err_approx_typecheck_shaping_not_integer : Error<
+  "array shaping operation dimension is not an integer">;
+def err_approx_shaping_dimension_not_positive : Error<
+  "array shaping dimension is evaluated to a non-positive value %0">;
+def err_approx_iterator_not_integral_or_pointer : Error<
+  "expected integral or pointer type as the iterator-type, not %0">;
+def err_approx_iterator_step_not_integral : Error<
+  "iterator step expression %0 is not the integral expression">;
+def err_approx_iterator_step_constant_zero : Error<
+  "iterator step expression %0 evaluates to 0">;
+def err_approx_expected_base_var_name : Error<
+  "expected variable name as a base of the array %select{subscript|section}0">;
+def err_approx_expected_var_name_member_expr_or_array_item : Error<
+  "expected variable name%select{|, data member of current class}0, array element or array section">;
+def err_approx_expected_var_name_member_expr : Error<
+  "expected variable name%select{| or data member of current class}0">;
+def err_approx_depend_zero_length_array_section_not_allowed : Error<
+  "zero-length array section is not allowed in 'in/out/inout' clause">;
+def err_approx_expected_addressable_lvalue_or_array_item : Error<
+  "expected addressable lvalue expression, array element">;
+def err_approx_expected_scalar_var_item: Error<
+  "unknown memory location, pointer values are not supported">;
+def err_approx_not_integral : Error<
+  "expression must have integral or unscoped enumeration "
+  "type, not %0">;
+def err_approx_incomplete_type : Error<
+  "expression has incomplete class type %0">;
+def err_approx_explicit_conversion : Error<
+  "expression requires explicit conversion from %0 to %1">;
+def note_approx_conversion_here : Note<
+  "conversion to %select{integral|enumeration}0 type %1 declared here">;
+def err_approx_ambiguous_conversion : Error<
+  "ambiguous conversion from type %0 to an integral or unscoped "
+  "enumeration type">;
 } // end of approx category
 
 let CategoryName = "OpenMP Issue" in {

@@ -1390,6 +1390,14 @@ void ASTContext::InitBuiltinTypes(const TargetInfo &Target,
   if (LangOpts.MatrixTypes)
     InitBuiltinType(IncompleteMatrixIdxTy, BuiltinType::IncompleteMatrixIdx);
 
+  InitBuiltinType(ApproxArraySectionTy, BuiltinType::ApproxArraySection);
+
+  // C99 6.2.5p11.
+  FloatComplexTy      = getComplexType(FloatTy);
+  DoubleComplexTy     = getComplexType(DoubleTy);
+  LongDoubleComplexTy = getComplexType(LongDoubleTy);
+  Float128ComplexTy   = getComplexType(Float128Ty);
+
   // Builtin types for 'id', 'Class', and 'SEL'.
   InitBuiltinType(ObjCBuiltinIdTy, BuiltinType::ObjCId);
   InitBuiltinType(ObjCBuiltinClassTy, BuiltinType::ObjCClass);
