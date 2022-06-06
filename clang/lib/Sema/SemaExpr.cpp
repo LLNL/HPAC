@@ -5198,9 +5198,12 @@ ExprResult Sema::ActOnApproxArraySectionExpr(Expr *Base, SourceLocation LBLoc,
     Expr::EvalResult Result;
     if (Length->EvaluateAsInt(Result, Context)) {
       llvm::APSInt LengthValue = Result.Val.getInt();
+      // FIXME: What is a good value for this?
+      llvm::SmallString<64> LengthValueStr;
+      LengthValue.toString(/*Str=*/LengthValueStr, /*Radix=*/10, /*Signed=*/true);
       if (LengthValue.isNegative()) {
         Diag(Length->getExprLoc(), diag::err_approx_section_length_negative)
-            << LengthValue.toString(/*Radix=*/10, /*Signed=*/true)
+            << LengthValueStr
             << Length->getSourceRange();
         return ExprError();
       }
