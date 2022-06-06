@@ -923,6 +923,7 @@ void StmtProfiler::VisitOMPCanonicalLoop(const OMPCanonicalLoop *L) {
 
 void StmtProfiler::VisitOMPLoopBasedDirective(const OMPLoopBasedDirective *S) {
   VisitOMPExecutableDirective(S);
+}
 
 void StmtProfiler::VisitApproxDirective(const ApproxDirective *S) {
   VisitStmt(S);
