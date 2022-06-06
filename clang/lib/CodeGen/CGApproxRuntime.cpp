@@ -134,8 +134,9 @@ getPointerAndSize(CodeGenFunction &CGF, const Expr *E) {
     // to the runtime system multiple in/out/inout parameters.
     LValue UpAddrLVal =
         CGF.EmitApproxArraySectionExpr(ASE, /*IsLowerBound=*/false);
+    Address UpAddrAddress = UpAddrLVal.getAddress(CGF);
     llvm::Value *UpAddr =
-        CGF.Builder.CreateConstGEP1_32(UpAddrLVal.getPointer(CGF), /*Idx0=*/1);
+      CGF.Builder.CreateConstGEP1_32(UpAddrAddress.getElementType(), UpAddrAddress.getPointer(), /*Idx0=*/1);
 
     llvm::Value *LowIntPtr = CGF.Builder.CreatePtrToInt(Addr, CGF.SizeTy);
     llvm::Value *UpIntPtr = CGF.Builder.CreatePtrToInt(UpAddr, CGF.SizeTy);
@@ -181,7 +182,7 @@ static void getPerfoInfoType(ASTContext &C, QualType &perfoInfoTy) {
     /// The approx step
     addFieldToRecordDecl(C, perfoInfoRD, C.getIntTypeForBitwidth(32, false));
     /// The percentage of loops to skip
-    addFieldToRecordDecl(C, perfoInfoRD, C.getRealTypeForBitwidth(32, false));
+    addFieldToRecordDecl(C, perfoInfoRD, C.getRealTypeForBitwidth(32, FloatModeKind::Float));
     perfoInfoRD->completeDefinition();
     perfoInfoTy = C.getRecordType(perfoInfoRD);
   }
