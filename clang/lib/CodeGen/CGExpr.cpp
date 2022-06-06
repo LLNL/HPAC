@@ -4017,13 +4017,15 @@ LValue CodeGenFunction::EmitApproxArraySectionExpr(const ApproxArraySectionExpr 
     llvm::APSInt ConstLength;
     if (Length) {
       // Idx = LowerBound + Length - 1;
-      if (Length->isIntegerConstantExpr(ConstLength, C)) {
+      if (Length->isIntegerConstantExpr(C)) {
+        ConstLength = Length->getIntegerConstantExpr(C).getValue();
         ConstLength = ConstLength.zextOrTrunc(PointerWidthInBits);
         Length = nullptr;
       }
       auto *LowerBound = E->getLowerBound();
       llvm::APSInt ConstLowerBound(PointerWidthInBits, /*isUnsigned=*/false);
-      if (LowerBound && LowerBound->isIntegerConstantExpr(ConstLowerBound, C)) {
+      if (LowerBound && LowerBound->isIntegerConstantExpr(C)) {
+        ConstLowerBound = LowerBound->getIntegerConstantExpr(C).getValue();
         ConstLowerBound = ConstLowerBound.zextOrTrunc(PointerWidthInBits);
         LowerBound = nullptr;
       }
@@ -4062,8 +4064,10 @@ LValue CodeGenFunction::EmitApproxArraySectionExpr(const ApproxArraySectionExpr 
                              : BaseTy;
       if (auto *VAT = C.getAsVariableArrayType(ArrayTy)) {
         Length = VAT->getSizeExpr();
-        if (Length->isIntegerConstantExpr(ConstLength, C))
-          Length = nullptr;
+        if (Length->isIntegerConstantExpr(C)) {
+            ConstLength = Length->getIntegerConstantExpr(C).getValue();
+            Length = nullptr;
+        }
       } else {
         auto *CAT = C.getAsConstantArrayType(ArrayTy);
         ConstLength = CAT->getSize();
