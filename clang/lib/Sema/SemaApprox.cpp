@@ -445,7 +445,8 @@ bool ApproxIterationSpaceChecker::setStep(Expr *NewStep, bool Subtract) {
     //  > or >= then incr-expr must cause var to increase on each iteration of
     //  the loop.
     llvm::APSInt Result;
-    bool IsConstant = NewStep->isIntegerConstantExpr(Result, SemaRef.Context);
+    bool IsConstant = NewStep->isIntegerConstantExpr(SemaRef.Context);
+    Result = NewStep->getIntegerConstantExpr(SemaRef.Context).getValue();
     bool IsUnsigned = !NewStep->getType()->hasSignedIntegerRepresentation();
     bool IsConstNeg =
         IsConstant && Result.isSigned() && (Subtract != Result.isNegative());
@@ -988,8 +989,11 @@ static bool fitsInto(unsigned Bits, bool Signed, const Expr *E, Sema &SemaRef) {
   if (E == nullptr)
     return false;
   llvm::APSInt Result;
-  if (E->isIntegerConstantExpr(Result, SemaRef.Context))
-    return Signed ? Result.isSignedIntN(Bits) : Result.isIntN(Bits);
+  if (E->isIntegerConstantExpr(SemaRef.Context))
+    {
+      Result = E->getIntegerConstantExpr(SemaRef.Context).getValue();
+      return Signed ? Result.isSignedIntN(Bits) : Result.isIntN(Bits);
+    }
   return false;
 }
 
@@ -1004,8 +1008,10 @@ calculateNumIters(Sema &SemaRef, Scope *S, SourceLocation DefaultLoc,
   if (!NewStep.isUsable())
     return nullptr;
   llvm::APSInt LRes, URes, SRes;
-  bool IsLowerConst = Lower->isIntegerConstantExpr(LRes, SemaRef.Context);
-  bool IsStepConst = Step->isIntegerConstantExpr(SRes, SemaRef.Context);
+  bool IsLowerConst = Lower->isIntegerConstantExpr(SemaRef.Context);
+  LRes = Lower->getIntegerConstantExpr(SemaRef.Context).getValue();
+  bool IsStepConst = Step->isIntegerConstantExpr(SemaRef.Context);
+  SRes = Step->getIntegerConstantExpr(SemaRef.Context).getValue();
   bool NoNeedToConvert = IsLowerConst && !RoundToStep &&
                          ((!TestIsStrictOp && LRes.isNonNegative()) ||
                           (TestIsStrictOp && LRes.isStrictlyPositive()));
@@ -1038,7 +1044,8 @@ calculateNumIters(Sema &SemaRef, Scope *S, SourceLocation DefaultLoc,
     }
     NeedToReorganize = NoNeedToConvert;
   }
-  bool IsUpperConst = Upper->isIntegerConstantExpr(URes, SemaRef.Context);
+  bool IsUpperConst = Upper->isIntegerConstantExpr(SemaRef.Context);
+  URes = Upper->getIntegerConstantExpr(SemaRef.Context).getValue();
   if (NoNeedToConvert && IsLowerConst && IsUpperConst &&
       (!RoundToStep || IsStepConst)) {
     unsigned BW = LRes.getBitWidth() > URes.getBitWidth() ? LRes.getBitWidth()
@@ -1619,7 +1626,8 @@ static unsigned checkApproxLoop(Stmt *AStmt, Sema &SemaRef,
   // each iteration. Do not do this if the number of iterations may be kfold-ed.
   llvm::APSInt Result;
   bool IsConstant =
-      LastIteration.get()->isIntegerConstantExpr(Result, SemaRef.Context);
+      LastIteration.get()->isIntegerConstantExpr(SemaRef.Context);
+  Result = LastIteration.get()->getIntegerConstantExpr(SemaRef.Context).getValue();
   ExprResult CalcLastIteration;
   if (!IsConstant) {
     ExprResult SaveRef =
