@@ -412,6 +412,7 @@ void CodeGenFunction::EmitStmt(const Stmt *S, ArrayRef<const Attr *> Attrs) {
     break;
   case Stmt::OMPGenericLoopDirectiveClass:
     EmitOMPGenericLoopDirective(cast<OMPGenericLoopDirective>(*S));
+    break;
   case Stmt::ApproxDirectiveClass:
     EmitApproxDirective(cast<ApproxDirective>(*S));
     break;
