@@ -2587,9 +2587,10 @@ def fobjc_nonfragile_abi : Flag<["-"], "fobjc-nonfragile-abi">, Group<f_Group>;
 def fno_objc_nonfragile_abi : Flag<["-"], "fno-objc-nonfragile-abi">, Group<f_Group>;
 
 // Approx options
-def fapprox: Flag<["-"], "fapprox">, Group<f_Group>, Flags<[CC1Option, NoArgumentUnused]>,
-  HelpText<"Parse approx pragmas and generate approximate code.">;
-def fno_approx: Flag<["-"], "fno-approx">, Group<f_Group>, Flags<[NoArgumentUnused]>;
+defm approx : BoolFOption<"approx", LangOpts<"Approx">, DefaultFalse,
+  PosFlag<SetTrue, [CC1Option, NoArgumentUnused], "Parse approx pragmas and generate approximate code.", []>,
+  NegFlag<SetFalse>>;
+
 def fapprox_version_EQ : Joined<["-"], "fapprox-version=">, Group<f_Group>, Flags<[CC1Option, NoArgumentUnused]>;
 
 def fobjc_sender_dependent_dispatch : Flag<["-"], "fobjc-sender-dependent-dispatch">, Group<f_Group>;
