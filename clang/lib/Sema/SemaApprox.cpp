@@ -446,7 +446,8 @@ bool ApproxIterationSpaceChecker::setStep(Expr *NewStep, bool Subtract) {
     //  the loop.
     llvm::APSInt Result;
     bool IsConstant = NewStep->isIntegerConstantExpr(SemaRef.Context);
-    Result = NewStep->getIntegerConstantExpr(SemaRef.Context).getValue();
+    if(IsConstant)
+      Result = NewStep->getIntegerConstantExpr(SemaRef.Context).getValue();
     bool IsUnsigned = !NewStep->getType()->hasSignedIntegerRepresentation();
     bool IsConstNeg =
         IsConstant && Result.isSigned() && (Subtract != Result.isNegative());
@@ -1009,9 +1010,11 @@ calculateNumIters(Sema &SemaRef, Scope *S, SourceLocation DefaultLoc,
     return nullptr;
   llvm::APSInt LRes, URes, SRes;
   bool IsLowerConst = Lower->isIntegerConstantExpr(SemaRef.Context);
-  LRes = Lower->getIntegerConstantExpr(SemaRef.Context).getValue();
+  if(IsLowerConst)
+    LRes = Lower->getIntegerConstantExpr(SemaRef.Context).getValue();
   bool IsStepConst = Step->isIntegerConstantExpr(SemaRef.Context);
-  SRes = Step->getIntegerConstantExpr(SemaRef.Context).getValue();
+  if(IsStepConst)
+    SRes = Step->getIntegerConstantExpr(SemaRef.Context).getValue();
   bool NoNeedToConvert = IsLowerConst && !RoundToStep &&
                          ((!TestIsStrictOp && LRes.isNonNegative()) ||
                           (TestIsStrictOp && LRes.isStrictlyPositive()));
@@ -1045,7 +1048,8 @@ calculateNumIters(Sema &SemaRef, Scope *S, SourceLocation DefaultLoc,
     NeedToReorganize = NoNeedToConvert;
   }
   bool IsUpperConst = Upper->isIntegerConstantExpr(SemaRef.Context);
-  URes = Upper->getIntegerConstantExpr(SemaRef.Context).getValue();
+  if(IsUpperConst)
+    URes = Upper->getIntegerConstantExpr(SemaRef.Context).getValue();
   if (NoNeedToConvert && IsLowerConst && IsUpperConst &&
       (!RoundToStep || IsStepConst)) {
     unsigned BW = LRes.getBitWidth() > URes.getBitWidth() ? LRes.getBitWidth()
@@ -1627,7 +1631,8 @@ static unsigned checkApproxLoop(Stmt *AStmt, Sema &SemaRef,
   llvm::APSInt Result;
   bool IsConstant =
       LastIteration.get()->isIntegerConstantExpr(SemaRef.Context);
-  Result = LastIteration.get()->getIntegerConstantExpr(SemaRef.Context).getValue();
+  if(IsConstant)
+    Result = LastIteration.get()->getIntegerConstantExpr(SemaRef.Context).getValue();
   ExprResult CalcLastIteration;
   if (!IsConstant) {
     ExprResult SaveRef =
