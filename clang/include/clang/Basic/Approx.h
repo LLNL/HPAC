@@ -61,6 +61,8 @@ const unsigned PT_START = PT_SMALL;
 enum MemoType : uint {
   MT_IN = 0,
   MT_OUT,
+  MT_IN_DEVICE,
+  MT_OUT_DEVICE,
   MT_END
 };
 

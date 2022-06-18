@@ -28,7 +28,7 @@ const std::string ApproxPerfoClause::PerfoName[approx::PT_END] = {
     "small", "large", "rand", "init", "fini"};
 
 const std::string ApproxMemoClause::MemoName[approx::MT_END] = {
-    "in", "out"};
+  "in", "out", "in device", "out device"};
 
 ApproxInClause *ApproxInClause::Create(const ASTContext &C,
                                        SourceLocation StartLoc,

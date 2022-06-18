@@ -206,6 +206,7 @@ public:
 
   std::string getMemoTypeAsString() const {return MemoName[Type];}
   approx::MemoType getMemoType() const {return Type;}
+  void setMemoType(approx::MemoType T) {Type = T;}
 };
 
 class ApproxDTClause final : public ApproxClause {

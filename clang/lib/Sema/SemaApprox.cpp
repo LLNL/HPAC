@@ -2056,6 +2056,20 @@ StmtResult Sema::ActOnApproxDirective(Stmt *AssociatedStmt,
 
         break;
     }
+    else if(AC->getClauseKind() == CK_MEMO)
+      {
+        ApproxMemoClause *MC = cast<ApproxMemoClause>(AC);
+        if(isInOpenMPTargetExecutionDirective())
+          {
+            if(MC->getMemoType() == approx::MemoType::MT_IN) {
+              MC->setMemoType(approx::MemoType::MT_IN_DEVICE);
+              }
+            else if(MC->getMemoType() == approx::MemoType::MT_OUT) {
+              MC->setMemoType(approx::MemoType::MT_OUT_DEVICE);
+            }
+          }
+
+      }
   }
 
   if (OMPLoopDir) {
