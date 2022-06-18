@@ -147,7 +147,7 @@ bool __approx_skip_iteration(unsigned int i, float pr) {
             threadId = omp_get_thread_num();
         }
     }
-         
+
     if (RTEnv.randomNumbers[threadId*RAND_SIZE + index++] <= pr) {
         return true;
     }
@@ -178,6 +178,13 @@ void __approx_exec_call(void (*accurateFN)(void *), void (*perfoFN)(void *),
 const float approx_rt_get_percentage(){
   return RTEnv.perfoRate;
 }
+
+#pragma omp declare target
+void __approx_device_memo()
+{
+  printf("Approximated\n");
+}
+#pragma omp end declare target 
 
 const int approx_rt_get_step(){
   return RTEnv.perfoStep;
