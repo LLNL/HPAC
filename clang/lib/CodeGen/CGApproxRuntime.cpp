@@ -232,7 +232,8 @@ static void getVarInfoType(ASTContext &C, QualType &VarInfoTy) {
 }
 
 CGApproxRuntime::CGApproxRuntime(CodeGenModule &CGM)
-    : CGM(CGM), CallbackFnTy(nullptr), RTFnTy(nullptr), approxRegions(0),
+  : CGM(CGM), CallbackFnTy(nullptr), RTFnTy(nullptr), RTFnTyDevice(nullptr),
+    approxRegions(0),
       StartLoc(SourceLocation()), EndLoc(SourceLocation()), requiresData(false),
       requiresInputs(false) {
   ASTContext &C = CGM.getContext();
@@ -260,6 +261,8 @@ CGApproxRuntime::CGApproxRuntime(CodeGenModule &CGM)
        /* Ouput Data Descr. */ CGM.VoidPtrTy,
        /* Output Data Num Elements*/ CGM.Int32Ty},
       false);
+
+  RTFnTyDevice = llvm::FunctionType::get(CGM.VoidTy, false);
 }
 
 void CGApproxRuntime::CGApproxRuntimeEnterRegion(CodeGenFunction &CGF,
@@ -364,14 +367,21 @@ void CGApproxRuntime::CGApproxRuntimeEmitPerfoInit(
 void CGApproxRuntime::CGApproxRuntimeEmitMemoInit(
     CodeGenFunction &CGF, ApproxMemoClause &MemoClause) {
   requiresData = true;
-  if (MemoClause.getMemoType() == approx::MT_IN) {
-    requiresInputs = true;
-    approxRTParams[MemoDescr] =
+  switch(MemoClause.getMemoType()) {
+    case approx::MT_IN:
+      requiresInputs = true;
+      approxRTParams[MemoDescr] =
         llvm::ConstantInt::get(CGF.Builder.getInt32Ty(), 1);
-  } else if (MemoClause.getMemoType() == approx::MT_OUT) {
+      break;
+    case approx::MT_OUT:
     approxRTParams[MemoDescr] =
         llvm::ConstantInt::get(CGF.Builder.getInt32Ty(), 2);
-  }
+      break;
+    case approx::MT_IN_DEVICE:
+      break;
+    case approx::MT_OUT_DEVICE:
+      break;
+    }
 }
 
 void CGApproxRuntime::CGApproxRuntimeEmitIfInit(CodeGenFunction &CGF,
@@ -635,6 +645,21 @@ void CGApproxRuntime::CGApproxRuntimeExitRegion(CodeGenFunction &CGF) {
 
   llvm::FunctionCallee RTFnCallee({RTFnTy, RTFn});
   CGF.EmitRuntimeCall(RTFnCallee, ArrayRef<llvm::Value *>(approxRTParams));
+}
+
+
+void CGApproxRuntime::CGApproxRuntimeExitRegionDevice(CodeGenFunction &CGF) {
+  Function *RTFnDev = nullptr;
+  StringRef RTFnName("__approx_device_memo");
+  RTFnDev = CGM.getModule().getFunction(RTFnName);
+
+  assert(RTFnTyDevice != nullptr);
+  if (!RTFnDev)
+    RTFnDev = Function::Create(RTFnTyDevice, GlobalValue::ExternalLinkage, RTFnName,
+                               CGM.getModule());
+
+  llvm::FunctionCallee RTFnCallee({RTFnTyDevice, RTFnDev});
+  CGF.EmitRuntimeCall(RTFnCallee);
 }
 
 void CGApproxRuntime::CGApproxRuntimeRegisterInputs(ApproxInClause &InClause) {

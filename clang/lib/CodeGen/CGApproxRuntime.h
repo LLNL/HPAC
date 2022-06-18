@@ -80,6 +80,8 @@ private:
   llvm::FunctionType *CallbackFnTy;
   // Function type of the runtime interface call.
   llvm::FunctionType *RTFnTy;
+  // Function type of runtime interface when generating code for a device
+  llvm::FunctionType *RTFnTyDevice;
   int approxRegions;
   SourceLocation StartLoc;
   SourceLocation EndLoc;
@@ -101,6 +103,7 @@ public:
                                  ApproxIfClause &IfClause);
   void CGApproxRuntimeEmitLabelInit(CodeGenFunction &CGF, ApproxLabelClause &LabelCluse);
   void CGApproxRuntimeExitRegion(CodeGenFunction &CGF);
+  void CGApproxRuntimeExitRegionDevice(CodeGenFunction &CGF);
   void CGApproxRuntimeRegisterInputs(ApproxInClause &InClause);
   void CGApproxRuntimeRegisterOutputs(ApproxOutClause &OutClause);
   void CGApproxRuntimeRegisterInputsOutputs(ApproxInOutClause &InOutClause);

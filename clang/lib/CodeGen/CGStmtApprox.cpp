@@ -54,5 +54,5 @@ void CodeGenFunction::EmitApproxDirective(const ApproxDirective &AD) {
   }
 
   RT.CGApproxRuntimeEmitDataValues(*this);
-  RT.CGApproxRuntimeExitRegion(*this);
+  RT.CGApproxRuntimeExitRegionDevice(*this);
 }
