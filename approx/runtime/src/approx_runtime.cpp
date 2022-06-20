@@ -179,13 +179,6 @@ const float approx_rt_get_percentage(){
   return RTEnv.perfoRate;
 }
 
-#pragma omp declare target
-void __approx_device_memo()
-{
-  printf("Approximated\n");
-}
-#pragma omp end declare target 
-
 const int approx_rt_get_step(){
   return RTEnv.perfoStep;
 }
