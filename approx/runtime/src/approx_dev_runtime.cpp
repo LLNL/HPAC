@@ -11,13 +11,15 @@
 //===----------------------------------------------------------------------===//
 //
 #include "approx.h"
+#include "approx_internal.h"
 #include <omp.h>
 #include <stdio.h>
 
 #pragma omp declare target
 void __approx_device_memo(int memo_type, void *in_data, int nInputs, void *out_data, int nOutputs)
 {
-  printf("Approximated %d inputs, %d outputs, value: %d\n", nInputs, nOutputs, ((int*)in_data)[0]);
+  approx_var_info_t *in_vars = (approx_var_info_t*) in_data;
+  printf("Approximated type %d: %d inputs, %d outputs, value: %d\n", memo_type, nInputs, nOutputs, *(int*)(in_vars[0].ptr));
 }
 #pragma omp end declare target
 
