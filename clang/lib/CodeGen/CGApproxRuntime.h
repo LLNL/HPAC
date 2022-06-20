@@ -48,7 +48,9 @@ enum ApproxRTArgsIndex : uint {
 };
 
 enum DevApproxRTArgsIndex : uint {
-  DevMemoDescr = 0,
+  DevAccurateFn = 0,
+  DevCapDataPtr,
+  DevMemoDescr,
   DevDataDescIn,
   DevDataSizeIn,
   DevDataDescOut,
@@ -60,7 +62,7 @@ enum DevApproxRTArgsIndex : uint {
 enum Directionality : int { Input = 1, Output = 2, InputOuput = 4 };
 
 const unsigned ARG_START = AccurateFn;
-const unsigned DEV_ARG_START = DevDataDescIn;
+const unsigned DEV_ARG_START = DevAccurateFn;
 
 
 class CGApproxRuntime {
@@ -125,6 +127,7 @@ private:
   CodeGenModule &CGM;
 
   llvm::Value *approxRTParams[DEV_ARG_END];
+
   // Function type of the runtime interface call.
   llvm::FunctionType *RTFnTy;
 

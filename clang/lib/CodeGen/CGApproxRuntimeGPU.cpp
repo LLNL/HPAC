@@ -32,6 +32,8 @@ CGApproxRuntimeGPU::CGApproxRuntimeGPU(CodeGenModule &CGM)
   // types provided in the argument parameters.
   RTFnTy = llvm::FunctionType::get(CGM.VoidTy,
                                          {
+                                           /* Orig. fn ptr*/ llvm::PointerType::getUnqual(CallbackFnTy),
+                                           /* Captured data ptr*/ CGM.VoidPtrTy,
                                            /* Memoization Type */ CGM.Int32Ty,
                                            /* Input Data Descr. */ CGM.VoidPtrTy,
                                            /* Input Data Num Elements */ CGM.Int32Ty,
@@ -69,6 +71,10 @@ void CGApproxRuntimeGPU::CGApproxRuntimeEnterRegion(CodeGenFunction &CGF,
   /// Fill in parameters of runtime function call
   /// Put default values on everything.
   /// EmitClause* Will replace as necessary
+  approxRTParams[DevAccurateFn] =
+    CGF.Builder.CreatePointerCast(Fn, CallbackFnTy->getPointerTo());
+  approxRTParams[DevCapDataPtr] =
+      CGF.Builder.CreatePointerCast(CapStructAddr.getPointer(), CGM.VoidPtrTy);
   approxRTParams[DevDataDescIn] = llvm::ConstantPointerNull::get(CGM.VoidPtrTy);
   approxRTParams[DevDataSizeIn] =
       llvm::ConstantInt::get(CGF.Builder.getInt32Ty(), 0);
