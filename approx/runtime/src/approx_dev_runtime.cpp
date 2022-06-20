@@ -15,9 +15,9 @@
 #include <stdio.h>
 
 #pragma omp declare target
-void __approx_device_memo()
+void __approx_device_memo(int memo_type, void *in_data, int nInputs, void *out_data, int nOutputs)
 {
-  printf("Approximated\n");
+  printf("Approximated %d inputs, %d outputs, value: %d\n", nInputs, nOutputs, ((int*)in_data)[0]);
 }
 #pragma omp end declare target
 

@@ -60,7 +60,8 @@ enum DevApproxRTArgsIndex : uint {
 enum Directionality : int { Input = 1, Output = 2, InputOuput = 4 };
 
 const unsigned ARG_START = AccurateFn;
-const unsigned DEV_ARG_START = DevMemoDescr;
+const unsigned DEV_ARG_START = DevDataDescIn;
+
 
 class CGApproxRuntime {
 protected:
@@ -91,8 +92,6 @@ protected:
   llvm::FunctionType *CallbackFnTy;
   // Function type of the runtime interface call.
   llvm::FunctionType *RTFnTy;
-  // Function type of runtime interface when generating code for a device
-  llvm::FunctionType *RTFnTyDevice;
   int approxRegions;
   SourceLocation StartLoc;
   SourceLocation EndLoc;
@@ -102,6 +101,7 @@ protected:
 protected:
   void CGApproxRuntimeEmitPerfoFn(CapturedStmt &CS, const ApproxLoopHelperExprs &LoopExprs, const ApproxPerfoClause &PC);
   std::pair<llvm::Value *, llvm::Value *> CGApproxRuntimeEmitData(CodeGenFunction &CGF, llvm::SmallVector<std::pair<Expr *, Directionality>, 16> &Data, const char *arrayName);
+  void getVarInfoType(ASTContext &C, QualType &VarInfoTy);
 
 public:
   CGApproxRuntime(CodeGenModule &CGM);
@@ -117,7 +117,7 @@ public:
   void CGApproxRuntimeRegisterInputs(ApproxInClause &InClause);
   void CGApproxRuntimeRegisterOutputs(ApproxOutClause &OutClause);
   void CGApproxRuntimeRegisterInputsOutputs(ApproxInOutClause &InOutClause);
-  void CGApproxRuntimeEmitDataValues(CodeGenFunction &CG);
+  virtual void CGApproxRuntimeEmitDataValues(CodeGenFunction &CG);
 };
 
 class CGApproxRuntimeGPU : public CGApproxRuntime {
@@ -134,6 +134,7 @@ public:
   void CGApproxRuntimeEmitMemoInit(CodeGenFunction &CGF,
                                    ApproxMemoClause &MemoClause) override;
   void CGApproxRuntimeExitRegion(CodeGenFunction &CGF) override;
+  void CGApproxRuntimeEmitDataValues(CodeGenFunction &CG) override;
 };
 } // namespace CodeGen
 } // namespace clang

@@ -205,7 +205,7 @@ static void getPerfoInfoType(ASTContext &C, QualType &perfoInfoTy) {
   return;
 }
 
-static void getVarInfoType(ASTContext &C, QualType &VarInfoTy) {
+void CGApproxRuntime::getVarInfoType(ASTContext &C, QualType &VarInfoTy) {
   if (VarInfoTy.isNull()) {
     RecordDecl *VarInfoRD = C.buildImplicitRecord("approx_var_info_t");
     VarInfoRD->startDefinition();
