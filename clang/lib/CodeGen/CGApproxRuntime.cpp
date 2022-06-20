@@ -232,7 +232,7 @@ static void getVarInfoType(ASTContext &C, QualType &VarInfoTy) {
 }
 
 CGApproxRuntime::CGApproxRuntime(CodeGenModule &CGM)
-  : CGM(CGM), CallbackFnTy(nullptr), RTFnTy(nullptr), RTFnTyDevice(nullptr),
+  : CGM(CGM), CallbackFnTy(nullptr), RTFnTy(nullptr),
     approxRegions(0),
       StartLoc(SourceLocation()), EndLoc(SourceLocation()), requiresData(false),
       requiresInputs(false) {
@@ -262,7 +262,6 @@ CGApproxRuntime::CGApproxRuntime(CodeGenModule &CGM)
        /* Output Data Num Elements*/ CGM.Int32Ty},
       false);
 
-  RTFnTyDevice = llvm::FunctionType::get(CGM.VoidTy, false);
 }
 
 void CGApproxRuntime::CGApproxRuntimeEnterRegion(CodeGenFunction &CGF,
@@ -314,6 +313,7 @@ void CGApproxRuntime::CGApproxRuntimeEnterRegion(CodeGenFunction &CGF,
   EndLoc = CS.getEndLoc();
   return;
 }
+
 
 // TODO: Should we add LoopExprs to the PerfoClause?
 void CGApproxRuntime::CGApproxRuntimeEmitPerfoInit(
@@ -376,10 +376,6 @@ void CGApproxRuntime::CGApproxRuntimeEmitMemoInit(
     case approx::MT_OUT:
     approxRTParams[MemoDescr] =
         llvm::ConstantInt::get(CGF.Builder.getInt32Ty(), 2);
-      break;
-    case approx::MT_IN_DEVICE:
-      break;
-    case approx::MT_OUT_DEVICE:
       break;
     }
 }
@@ -647,20 +643,6 @@ void CGApproxRuntime::CGApproxRuntimeExitRegion(CodeGenFunction &CGF) {
   CGF.EmitRuntimeCall(RTFnCallee, ArrayRef<llvm::Value *>(approxRTParams));
 }
 
-
-void CGApproxRuntime::CGApproxRuntimeExitRegionDevice(CodeGenFunction &CGF) {
-  Function *RTFnDev = nullptr;
-  StringRef RTFnName("__approx_device_memo");
-  RTFnDev = CGM.getModule().getFunction(RTFnName);
-
-  assert(RTFnTyDevice != nullptr);
-  if (!RTFnDev)
-    RTFnDev = Function::Create(RTFnTyDevice, GlobalValue::ExternalLinkage, RTFnName,
-                               CGM.getModule());
-
-  llvm::FunctionCallee RTFnCallee({RTFnTyDevice, RTFnDev});
-  CGF.EmitRuntimeCall(RTFnCallee);
-}
 
 void CGApproxRuntime::CGApproxRuntimeRegisterInputs(ApproxInClause &InClause) {
   for (auto *V : InClause.varlist()) {

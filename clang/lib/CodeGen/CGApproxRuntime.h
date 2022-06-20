@@ -47,12 +47,23 @@ enum ApproxRTArgsIndex : uint {
   ARG_END
 };
 
+enum DevApproxRTArgsIndex : uint {
+  DevMemoDescr = 0,
+  DevDataDescIn,
+  DevDataSizeIn,
+  DevDataDescOut,
+  DevDataSizeOut,
+  DEV_ARG_END
+};
+
+
 enum Directionality : int { Input = 1, Output = 2, InputOuput = 4 };
 
 const unsigned ARG_START = AccurateFn;
+const unsigned DEV_ARG_START = DevMemoDescr;
 
 class CGApproxRuntime {
-private:
+protected:
   CodeGenModule &CGM;
   /// PerfoInfoTy is a struct containing infor about the perforation.
   ///  typedef struct approx_perfo_info_t{
@@ -88,28 +99,42 @@ private:
   bool requiresData;
   bool requiresInputs;
 
-private:
+protected:
   void CGApproxRuntimeEmitPerfoFn(CapturedStmt &CS, const ApproxLoopHelperExprs &LoopExprs, const ApproxPerfoClause &PC);
   std::pair<llvm::Value *, llvm::Value *> CGApproxRuntimeEmitData(CodeGenFunction &CGF, llvm::SmallVector<std::pair<Expr *, Directionality>, 16> &Data, const char *arrayName);
 
 public:
   CGApproxRuntime(CodeGenModule &CGM);
-  void CGApproxRuntimeEnterRegion(CodeGenFunction &CGF, CapturedStmt &CS);
+  virtual void CGApproxRuntimeEnterRegion(CodeGenFunction &CGF, CapturedStmt &CS);
   void CGApproxRuntimeEmitPerfoInit(CodeGenFunction &CGF, CapturedStmt &CS,
                                     ApproxPerfoClause &PerfoClause, const ApproxLoopHelperExprs &LoopExprs);
-  void CGApproxRuntimeEmitMemoInit(CodeGenFunction &CGF,
+  virtual void CGApproxRuntimeEmitMemoInit(CodeGenFunction &CGF,
                                    ApproxMemoClause &MemoClause);
   void CGApproxRuntimeEmitIfInit(CodeGenFunction &CGF,
                                  ApproxIfClause &IfClause);
   void CGApproxRuntimeEmitLabelInit(CodeGenFunction &CGF, ApproxLabelClause &LabelCluse);
-  void CGApproxRuntimeExitRegion(CodeGenFunction &CGF);
-  void CGApproxRuntimeExitRegionDevice(CodeGenFunction &CGF);
+  virtual void CGApproxRuntimeExitRegion(CodeGenFunction &CGF);
   void CGApproxRuntimeRegisterInputs(ApproxInClause &InClause);
   void CGApproxRuntimeRegisterOutputs(ApproxOutClause &OutClause);
   void CGApproxRuntimeRegisterInputsOutputs(ApproxInOutClause &InOutClause);
   void CGApproxRuntimeEmitDataValues(CodeGenFunction &CG);
 };
 
+class CGApproxRuntimeGPU : public CGApproxRuntime {
+private:
+  CodeGenModule &CGM;
+
+  llvm::Value *approxRTParams[DEV_ARG_END];
+  // Function type of the runtime interface call.
+  llvm::FunctionType *RTFnTy;
+
+public:
+  CGApproxRuntimeGPU(CodeGenModule &CGM);
+  void CGApproxRuntimeEnterRegion(CodeGenFunction &CGF, CapturedStmt &CS) override;
+  void CGApproxRuntimeEmitMemoInit(CodeGenFunction &CGF,
+                                   ApproxMemoClause &MemoClause) override;
+  void CGApproxRuntimeExitRegion(CodeGenFunction &CGF) override;
+};
 } // namespace CodeGen
 } // namespace clang
 

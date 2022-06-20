@@ -168,6 +168,7 @@ CodeGenModule::CodeGenModule(ASTContext &C,
   if(LangOpts.Approx)
     createApproxRuntime();
 
+
   // Enable TBAA unless it's suppressed. ThreadSanitizer needs TBAA even at O0.
   if (LangOpts.Sanitize.has(SanitizerKind::Thread) ||
       (!CodeGenOpts.RelaxedAliasing && CodeGenOpts.OptimizationLevel > 0))
@@ -217,7 +218,17 @@ CodeGenModule::CodeGenModule(ASTContext &C,
 CodeGenModule::~CodeGenModule() {}
 
 void CodeGenModule::createApproxRuntime(){
-  ApproxRuntime.reset(new CGApproxRuntime(*this));
+  switch(getTriple().getArch()) {
+  case llvm::Triple::nvptx:
+  case llvm::Triple::nvptx64:
+    llvm::dbgs() << "Creating approx runtime for the gpu\n";
+    ApproxRuntime.reset(new CGApproxRuntimeGPU(*this));
+    break;
+  default:
+    llvm::dbgs() << "Creating approx runtime for the cpu\n";
+    ApproxRuntime.reset(new CGApproxRuntime(*this));
+    break;
+  }
 }
 
 void CodeGenModule::createObjCRuntime() {
