@@ -42,6 +42,7 @@ VERS1.0 {
     omp_target_memcpy;
     omp_target_memcpy_rect;
     omp_target_associate_ptr;
+    omp_get_mapped_ptr;
     omp_target_disassociate_ptr;
     llvm_omp_target_alloc_host;
     llvm_omp_target_alloc_shared;

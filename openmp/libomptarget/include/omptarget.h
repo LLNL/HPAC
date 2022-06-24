@@ -285,21 +285,22 @@ extern "C" {
 int omp_get_num_devices(void);
 int omp_get_device_num(void);
 int omp_get_initial_device(void);
-void *omp_target_alloc(size_t Size, int DeviceNum);
-void omp_target_free(void *DevicePtr, int DeviceNum);
-int omp_target_is_present(const void *Ptr, int DeviceNum);
-int omp_target_memcpy(void *Dst, const void *Src, size_t Length,
-                      size_t DstOffset, size_t SrcOffset, int DstDevice,
-                      int SrcDevice);
-int omp_target_memcpy_rect(void *Dst, const void *Src, size_t ElementSize,
-                           int NumDims, const size_t *Volume,
-                           const size_t *DstOffsets, const size_t *SrcOffsets,
-                           const size_t *DstDimensions,
-                           const size_t *SrcDimensions, int DstDevice,
-                           int SrcDevice);
-int omp_target_associate_ptr(const void *HostPtr, const void *DevicePtr,
-                             size_t Size, size_t DeviceOffset, int DeviceNum);
-int omp_target_disassociate_ptr(const void *HostPtr, int DeviceNum);
+void *omp_target_alloc(size_t size, int device_num);
+void omp_target_free(void *device_ptr, int device_num);
+int omp_target_is_present(const void *ptr, int device_num);
+void *omp_get_mapped_ptr(const void *ptr, int device_num);
+int omp_target_memcpy(void *dst, const void *src, size_t length,
+                      size_t dst_offset, size_t src_offset, int dst_device,
+                      int src_device);
+int omp_target_memcpy_rect(void *dst, const void *src, size_t element_size,
+                           int num_dims, const size_t *volume,
+                           const size_t *dst_offsets, const size_t *src_offsets,
+                           const size_t *dst_dimensions,
+                           const size_t *src_dimensions, int dst_device,
+                           int src_device);
+int omp_target_associate_ptr(const void *host_ptr, const void *device_ptr,
+                             size_t size, size_t device_offset, int device_num);
+int omp_target_disassociate_ptr(const void *host_ptr, int device_num);
 
 /// Explicit target memory allocators
 /// Using the llvm_ prefix until they become part of the OpenMP standard.

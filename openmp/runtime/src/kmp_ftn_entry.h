@@ -1075,6 +1075,8 @@ void FTN_STDCALL FTN_TARGET_FREE(void *device_ptr, int device_num) {}
 
 int FTN_STDCALL FTN_TARGET_IS_PRESENT(void *ptr, int device_num) { return 0; }
 
+void *FTN_STDCALL FTN_GET_MAPPED_PTR(const void *ptr, int device_num) { return 0; }
+
 int FTN_STDCALL FTN_TARGET_MEMCPY(void *dst, void *src, size_t length,
                                   size_t dst_offset, size_t src_offset,
                                   int dst_device, int src_device) {
