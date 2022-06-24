@@ -10106,17 +10106,11 @@ void CGOpenMPRuntime::scanForTargetRegionsFunctions(const Stmt *S,
   if(ApproxDirective *AD = dyn_cast<ApproxDirective>(Ss))
     {
       CapturedStmt *CStmt = cast<CapturedStmt>(AD->getAssociatedStmt());
-      const auto &E = *cast<OMPExecutableDirective>(CStmt->getCapturedStmt());
-      unsigned DeviceID;
-      unsigned FileID;
-      unsigned Line;
-      getTargetEntryUniqueInfo(CGM.getContext(), E.getBeginLoc(), DeviceID,
-                               FileID, Line);
-
-      CodeGenFunction::EmitOMPTargetTeamsDistributeDeviceFunction(
-          CGM, ParentName, cast<OMPTargetTeamsDistributeDirective>(E));
-
+      const auto *E = cast<OMPExecutableDirective>(CStmt->getCapturedStmt());
+      scanForTargetRegionsFunctions(E, ParentName);
+      return;
     }
+
   // Codegen OMP target directives that offload compute to the device.
   bool RequiresDeviceCodegen =
       isa<OMPExecutableDirective>(S) &&
