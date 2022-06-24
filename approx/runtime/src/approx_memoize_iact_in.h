@@ -82,7 +82,11 @@ class MemoizeInput {
         }
 
         void execute(void *args, approx_var_info_t *inputs, approx_var_info_t *outputs){
-            packVarToVec(inputs, num_inputs, iTemp);
+
+          // FIXME: update for multiple devices
+          int bytes_transferred = copy_vars_to_device(inputs, num_inputs, omp_get_initial_device(), 0);
+          packVarToVec(inputs, num_inputs, iTemp);
+
             real_t minDist = std::numeric_limits<real_t>::max(); 
             int index = -1;
             if ( iSize != 1){
@@ -131,6 +135,7 @@ class MemoizeInput {
                 accurate(args);
                 if (input_index < tSize ){
                     std::memcpy(inTable[input_index], iTemp, sizeof(real_t)*iSize);
+                    bytes_transferred = copy_vars_to_device(outputs, num_outputs, omp_get_initial_device(), 0);
                     packVarToVec(outputs, num_outputs, outTable[input_index]);
                     input_index +=1;
                 }
@@ -138,7 +143,9 @@ class MemoizeInput {
             else{
                 approximately++;
                 unPackVecToVar(outputs, num_outputs, outTable[index]);
+                bytes_transferred = copy_vars_to_device(outputs, num_outputs, 0, omp_get_initial_device());
             }
+
         }
 
         void execute_both(void *args, approx_var_info_t *inputs, approx_var_info_t *outputs){
