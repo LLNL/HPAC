@@ -89,6 +89,9 @@ int getHistorySize();
 int getTableSize();
 float getThreshold();
 
+int copy_vars_to_device(approx_var_info_t *vals, int numVals, int destDev, int srcDev);
+int copy_var_to_device(approx_var_info_t *vals, int destDev, int srcDev);
+
 #ifdef __cplusplus
 }
 #endif

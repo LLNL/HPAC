@@ -9,6 +9,7 @@ set(LIBAPPROX_SOURCE_FILES
     approx_runtime.cpp
     approx_dev_runtime.cpp
     approx_data_util.cpp
+    approx_data_move.cpp
     approx_memoize_out.cpp
     approx_memoize_iact_in.cpp
     approx_perforate.cpp
