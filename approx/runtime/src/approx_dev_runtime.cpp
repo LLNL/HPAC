@@ -19,7 +19,6 @@
 void __approx_device_memo(void (*accurateFN)(void *), void *arg, int memo_type, void *in_data, int nInputs, void *out_data, int nOutputs)
 {
   approx_var_info_t *in_vars = (approx_var_info_t*) in_data;
-  printf("Approximated type %d: %d inputs, %d outputs, value: %d\n", memo_type, nInputs, nOutputs, *(int*)(in_vars[0].ptr));
   accurateFN(arg);
 }
 #pragma omp end declare target

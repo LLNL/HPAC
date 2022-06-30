@@ -21,7 +21,7 @@ void __approx_exec_call(void (*accurate)(void *), void (*perforate)(void *),
                         void *arg, bool cond, const char *region_name, void *perfoArgs, int memo_type,
                         void *inputs, int num_inputs, void *outputs,
                         int num_outputs);
-void __approx_device_memo(int memo_type, void *in_data, int nInputs, void *out_data, int nOutputs);
+void __approx_device_memo(void (*accurateFN)(void *), void *arg, int memo_type, void *in_data, int nInputs, void *out_data, int nOutputs);
 const float approx_rt_get_percentage();
 const int approx_rt_get_step();
 

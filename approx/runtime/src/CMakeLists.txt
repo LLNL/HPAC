@@ -7,7 +7,7 @@ message("approx include is ${LIBAPPROX_INC_DIR}")
 
 set(LIBAPPROX_SOURCE_FILES
     approx_runtime.cpp
-    # approx_dev_runtime.cpp
+    approx_dev_runtime.cpp
     approx_data_util.cpp
     approx_data_move.cpp
     approx_memoize_out.cpp
