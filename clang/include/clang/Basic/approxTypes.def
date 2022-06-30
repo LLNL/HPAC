@@ -24,6 +24,7 @@ APPROX_TYPE(LONGLONG, long long, "long long")
 APPROX_TYPE(ULONGLONG, unsigned long long, "unsigned long long")
 APPROX_TYPE(FLOAT, float, "float")
 APPROX_TYPE(DOUBLE, double, "double")
-APPROX_TYPE(LDOUBLE, long double, "long double")
+// NOTE: nvptx64 does not support long double. How to account for this?
+// APPROX_TYPE(LDOUBLE, long double, "long double")
 
 #undef APPROX_TYPE

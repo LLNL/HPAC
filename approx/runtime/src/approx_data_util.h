@@ -18,6 +18,7 @@
 #include <iostream>
 #include <stdint.h>
 #include <cstring>
+#include <omp.h>
 
 #include "approx_internal.h"
 
@@ -93,6 +94,18 @@ template <typename To, typename From>
     dest[i] = (To) src[i];
   }
 }
+
+template <typename To, typename From> 
+void cast_and_assign_device(To *dest, From* src, size_t numElements){
+#pragma omp target data map(to:numElements)
+  {
+#pragma omp target teams distribute parallel for
+    for (int i = 0; i < numElements; i++){
+      dest[i] = (To) src[i];
+    }
+  }
+}
+
 
 template <typename T>
 void cast_and_assign(void *src, size_t numElements,
@@ -214,6 +227,28 @@ T* createTemp1DVarStorage(approx_var_info_t *vars, int numVars,
     return ptr;
 }
 
+#pragma omp declare target
+template<typename T>
+class AccessWrapper2D
+{
+public:
+  int nrows;
+  int ncols;
+  T *data;
+
+  AccessWrapper2D(T *_data, int nrow, int ncol) :
+    data{_data}, nrows{nrow}, ncols{ncol } {}
+  AccessWrapper2D()
+    : data{nullptr}, nrows{0}, ncols{0} {}
+
+  T& operator()(int row, int col)
+  {
+    return data[row*ncols + col];
+  }
+};
+#pragma omp end declare target
+
+
 template<typename T>
 void packVarToVec(approx_var_info_t *values, int num_values, T *vector){
   for (int i = 0; i < num_values; i++){
@@ -225,6 +260,50 @@ void packVarToVec(approx_var_info_t *values, int num_values, T *vector){
     convertTo(vector, values[i].ptr, values[i].num_elem, (ApproxType)values[i].data_type);
     vector += values[i].num_elem;
   }
+}
+
+// precond: omp_target_is_present(val, 0) is true for all input values and for vector
+template<typename T>
+void packVarToDeviceVec(approx_var_info_t *values, int num_values, T *vector)
+{
+  for(int i = 0; i < num_values; i++)
+    {
+      ApproxType DT = (ApproxType) values[i].data_type;
+      void *HostPtr = values[i].ptr;
+      size_t nElem = values[i].num_elem;
+    switch (DT) {
+#define APPROX_TYPE(Enum, CType, nameOfType)                                   \
+  case Enum:                                                                   \
+    cast_and_assign_device(vector, (CType *)HostPtr, nElem);           \
+    break;
+#include "clang/Basic/approxTypes.def"
+    case INVALID:
+      std::cout << "INVALID DATA TYPE passed in argument list\n";
+      break;
+    }
+      vector += nElem;
+    }
+}
+
+template<typename T>
+void unpackVecToVarDevice(approx_var_info_t *values, int num_values, T *vector){
+  for(int i = 0; i < num_values; i++){
+    ApproxType DT = (ApproxType)values[i].data_type;
+    void *HostPtr = values[i].ptr;
+    size_t nElem = values[i].num_elem;
+
+    switch (DT) {
+#define APPROX_TYPE(Enum, CType, nameOfType)                                   \
+  case Enum:                                                                   \
+    cast_and_assign_device((CType *) HostPtr, vector, nElem);                  \
+    break;
+#include "clang/Basic/approxTypes.def"
+    case INVALID:
+      std::cout << "INVALID DATA TYPE passed in argument list\n";
+      break;
+    }
+      vector += nElem;
+    }
 }
 
 template<typename T>

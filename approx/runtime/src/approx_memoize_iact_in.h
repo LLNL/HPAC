@@ -36,6 +36,8 @@ class MemoizeInput {
         real_t **outTable;
         real_t *iTemp;
         real_t *oTemp;
+        AccessWrapper2D<real_t> inTabWr;
+        AccessWrapper2D<real_t> outTabWr;
         void (*accurate)(void *);
         int num_inputs;
         int num_outputs;
@@ -50,7 +52,7 @@ class MemoizeInput {
     public:
         MemoizeInput(void (*acc)(void *), int num_inputs, int num_outputs,
                 approx_var_info_t *inputs, approx_var_info_t *outputs, int tSize, real_t threshold)
-            : accurate(acc), num_inputs(num_inputs), num_outputs(num_outputs),
+           : accurate(acc), num_inputs(num_inputs), num_outputs(num_outputs),
             tSize(tSize), threshold(threshold), input_index(0), output_index(0), 
             accurately(0), approximately(0) {
                 inTable = nullptr;
@@ -65,12 +67,27 @@ class MemoizeInput {
                 inTable = createTemp2DVarStorage<real_t>(inputs, num_inputs, tSize, &iSize);
                 outTable = createTemp2DVarStorage<real_t>(outputs, num_outputs, tSize, &oSize);
                 iTemp = createTemp1DVarStorage<real_t>(inputs, num_inputs, &iSize);
+                inTabWr = AccessWrapper2D<real_t>(inTable[0], tSize, iSize);
+                outTabWr = AccessWrapper2D<real_t>(outTable[0], tSize, oSize);
                 Addr = (unsigned long) acc;
+                int iSize1D = inTabWr.nrows*inTabWr.ncols;
+                int oSize1D = outTabWr.nrows*outTabWr.ncols;
+
+               #pragma omp target enter data map(to:this[:1])
+               #pragma omp target enter data map(to:inTabWr)
+               #pragma omp target enter data map(to:inTabWr.data[0:iSize1D])
+               #pragma omp target enter data map(to:iTemp[0:iSize])
+               #pragma omp target enter data map(to:outTabWr)
+               #pragma omp target enter data map(to:outTabWr.data[0:oSize1D])
             }
 
         ~MemoizeInput(){
             if (inTable)
+              {
+                // NOTE: we cannot do this because at this point CUDA RTL is de-initialized
+                // #pragma omp target exit data map(from:inTabWr, inTabWr.data[0:num])
                 delete2DArray(inTable);
+              }
             if (outTable)
                 delete2DArray(outTable);
             if ( iTemp )
@@ -83,47 +100,19 @@ class MemoizeInput {
 
         void execute(void *args, approx_var_info_t *inputs, approx_var_info_t *outputs){
 
-          // FIXME: update for multiple devices
-          int bytes_transferred = copy_vars_to_device(inputs, num_inputs, omp_get_initial_device(), 0);
-          packVarToVec(inputs, num_inputs, iTemp);
-
-            real_t minDist = std::numeric_limits<real_t>::max(); 
+            real_t minDist = std::numeric_limits<real_t>::max();
+            // NOTE: Assume that if output is on the device (output is currently mapped to the device), then
+            // input is also on the device and the computation being wrapped is a teams construct.
+            // This may not always be valid, and we should add functionality to determine this in
+            // CodeGen
+            bool outputOnDevice = omp_target_is_present(outputs[0].ptr, 0);
             int index = -1;
-            if ( iSize != 1){
-                for (int i = 0; i < input_index; i++){
-                    real_t *temp = inTable[i];
-                    real_t dist = 0.0f;
-                    for (int j = 0; j < iSize; j++){
-                        if (temp[j] != 0.0f)
-                            dist += fabs((iTemp[j] - temp[j])/temp[j]);
-                        else
-                            dist += fabs((iTemp[j] - temp[j]));
-                    }
-                    dist = dist/(real_t)iSize;
-                    if (dist < minDist){
-                        minDist = dist;
-                        index = i;
-                        if (minDist < threshold)
-                            break;
-                    }
-                }
-            }
-            else{
-                for (int i = 0; i < input_index; i++){
-                    real_t temp = inTable[i][0];
-                    real_t dist = 0.0f;
-                    if (temp != 0.0f)
-                        dist += fabs((iTemp[0] - temp)/temp);
-                    else
-                        dist += fabs((iTemp[0] - temp));
-                    dist = dist/(real_t)iSize;
-                    if (dist < minDist){
-                        minDist = dist;
-                        index = i;
-                        if (minDist < threshold)
-                            break;
-                    }
-                }
+            if (!outputOnDevice){
+              packVarToVec(inputs, num_inputs, iTemp);
+              calc_distance(index, minDist);
+            } else{
+              packVarToDeviceVec(inputs, num_inputs, iTemp);
+              calc_distance_device(index, minDist);
             }
 
             if (minDist > threshold){
@@ -134,25 +123,85 @@ class MemoizeInput {
                 accurately++;
                 accurate(args);
                 if (input_index < tSize ){
+                  if(!outputOnDevice){
                     std::memcpy(inTable[input_index], iTemp, sizeof(real_t)*iSize);
-                    bytes_transferred = copy_vars_to_device(outputs, num_outputs, omp_get_initial_device(), 0);
                     packVarToVec(outputs, num_outputs, outTable[input_index]);
+                  }else{
+                    void *dst = omp_get_mapped_ptr(&inTabWr(input_index, 0), 0);
+                    void * src = omp_get_mapped_ptr(iTemp, 0);
+                    omp_target_memcpy(dst, src, sizeof(real_t)*iSize,
+                                      /*dest offset*/ 0, /*src offset*/0,
+                                      /*dest device*/0, /*src device*/0
+                                      );
+                    packVarToDeviceVec(outputs, num_outputs, outTable[input_index]);
+                  }
                     input_index +=1;
                 }
             }
             else{
                 approximately++;
-                unPackVecToVar(outputs, num_outputs, outTable[index]);
-                bytes_transferred = copy_vars_to_device(outputs, num_outputs, 0, omp_get_initial_device());
+                if(!outputOnDevice)
+                  unPackVecToVar(outputs, num_outputs, outTable[index]);
+                else
+                  unpackVecToVarDevice(outputs, num_outputs, outTable[index]);
             }
 
+        }
+
+  void calc_distance(int &minIdx, real_t &minDist) {
+    for (int i = 0; i < input_index; i++){
+      real_t dist = 0.0f;
+      for (int j = 0; j < iSize; j++){
+        if (inTabWr(i,j) != 0.0f)
+          dist += fabs((iTemp[j] - inTabWr(i,j))/inTabWr(i,j));
+        else
+          dist += fabs((iTemp[j] - inTabWr(i,j)));
+      }
+      dist = dist/(real_t)iSize;
+      if (dist < minDist){
+        minDist = dist;
+        minIdx = i;
+        if (minDist < threshold)
+          break;
+      }
+    }
+  }
+
+      // assume vectorized inputs in iTemp on the device
+        void calc_distance_device(int &minIdx, real_t &minDist) {
+          real_t mind[1]{std::numeric_limits<real_t>::max()};
+          int minidx[1]{-1};
+
+          #pragma omp target data map(to:iSize, num_inputs) map(tofrom:mind, minidx)
+          {
+            // TODO: How can we increase the granularity? Collapse? Won't work here because of the inner loop
+#pragma omp target teams distribute parallel for
+            {
+            for (int i = 0; i < num_inputs; i++){
+              real_t dist = 0.0f;
+              for (int j = 0; j < iSize; j++){
+                if (inTabWr(i,j) != 0.0f)
+                  dist += fabs((iTemp[j] - inTabWr(i,j))/inTabWr(i,j));
+                else
+                  dist += fabs((iTemp[j] - inTabWr(i,j)));
+              }
+              dist = dist/(real_t)iSize;
+              if (dist < mind[0]){
+                mind[0] = dist;
+                minidx[0] = i;
+              }
+            }
+          }
+          }
+          minDist = mind[0];
+          minIdx = minidx[0];
         }
 
         void execute_both(void *args, approx_var_info_t *inputs, approx_var_info_t *outputs){
             packVarToVec(inputs, num_inputs, iTemp);
             accurate(args);
 
-            real_t minDist = std::numeric_limits<real_t>::max(); 
+            real_t minDist = std::numeric_limits<real_t>::max();
             int index = -1;
             // Iterate in table and find closest input value
             for (int i = 0; i < input_index; i++){

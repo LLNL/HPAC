@@ -70,9 +70,10 @@ int8_t convertToApproxType(const BuiltinType *T) {
   case BuiltinType::Kind::Double:
     approxType = DOUBLE;
     break;
-  case BuiltinType::Kind::LongDouble:
-    approxType = LDOUBLE;
-    break;
+  // Long double not available for nvptx64 target
+  // case BuiltinType::Kind::LongDouble:
+  //   approxType = LDOUBLE;
+  //   break;
   default:
     approxType = ApproxType::INVALID;
     break;
