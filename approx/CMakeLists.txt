@@ -10,6 +10,7 @@ set(CMAKE_BUILD_TYPE Release)
 set(CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake/;${CMAKE_MODULE_PATH}")
 
 find_package(OpenMP REQUIRED)
+set(OpenMP_CXX_FLAGS "${OpenMP_CXX_FLAGS} -Xopenmp-target -march=sm_86 -fopenmp-targets=nvptx64")
 
 if (OPENMP_FOUND)
     set (CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${OpenMP_C_FLAGS}")

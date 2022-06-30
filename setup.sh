@@ -22,7 +22,8 @@ LIGHTCYAN='\033[1;36m'
 WHITE='\033[1;37m'
 
 clang_bin=$prefix/bin/clang
-approx_runtime_lib=$prefix/lib/libapprox.so
+#approx_runtime_lib=$prefix/lib/libapprox.so
+approx_runtime_lib=/dev/null
 
 
 if [ ! -f $clang_bin ]; then
@@ -39,7 +40,7 @@ if [ ! -f $clang_bin ]; then
     -DLLVM_OPTIMIZED_TABLEGEN='On' \
     -DCLANG_BUILD_EXAMPLES='On' \
     -DBUILD_SHARED_LIBS='On' \
-    -DLLVM_ENABLE_ASSERTIONS='On' \
+    -DLLVM_ENABLE_ASSERTIONS='Off' \
     ../llvm
 
     ninja -j $threads
@@ -60,13 +61,29 @@ if [ ! -f $approx_runtime_lib ]; then
   CC=clang CPP=clang++ cmake -G Ninja \
       -DCMAKE_INSTALL_PREFIX=$prefix \
       -DLLVM_EXTERNAL_CLANG_SOURCE_DIR=${current_dir}/clang/ \
+      -DPACKAGE_VERSION=14.0.5 \
+	  -DLIBAPPROX_ENABLE_SHARED=0 \
+     ../approx
+    ninja -j $threads
+    ninja -j $threads install
+    popd
+fi
+exit
+if [ ! -f $approx_runtime_lib ]; then
+  mkdir build_hpac
+  pushd build_hpac
+  CC=clang CPP=clang++ cmake -G Ninja \
+      -DCMAKE_INSTALL_PREFIX=$prefix \
+      -DLLVM_EXTERNAL_CLANG_SOURCE_DIR=${current_dir}/clang/ \
       -DPACKAGE_VERSION=15.0.0git \
+	  -DLIBAPPROX_ENABLE_SHARED=0 \
      ../approx
     ninja -j $threads
     ninja -j $threads install
     popd
 fi
 
+exit
 pushd ./approx/approx_utilities/
 
 if [ ! -f 'original_src.tar.gz' ]; then
