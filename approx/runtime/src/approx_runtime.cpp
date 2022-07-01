@@ -40,6 +40,37 @@ enum ExecuteMode: uint8_t{
   EXECUTE
 };
 
+#pragma omp declare target
+class ApproxRuntimeDevDataEnv{
+
+public:
+  int tableSize;
+  real_t *table;
+  ApproxRuntimeDevDataEnv() {
+    tableSize = 5;
+    const char *env_p = std::getenv("TABLE_SIZE");
+    printf( "HELLO WORLD\n");
+    if(env_p){
+      tableSize = atoi(env_p);
+    } else {
+      std::cerr << "ERROR: No tablesize provided via the 'TABLE_SIZE' environment variable.\n";
+      std::abort();
+    }
+
+    table = new real_t[tableSize];
+
+#pragma omp target enter data map(to:this[:1], tableSize, table[0:tableSize])
+  }
+
+  // ~ApproxRuntimeDevDataEnv() {
+  //   delete[] table;
+  // }
+};
+
+ApproxRuntimeDevDataEnv RTEnvd = ApproxRuntimeDevDataEnv();
+#pragma omp end declare target
+
+
 class ApproxRuntimeConfiguration{
   ExecuteMode Mode;
 public:
@@ -56,6 +87,7 @@ public:
   ApproxRuntimeConfiguration() {
       ExecuteBoth = false;
       count = 0;
+      printf("Hi there\n");
 
     const char *env_p = std::getenv("EXECUTE_BOTH");
     if (env_p){
@@ -117,6 +149,8 @@ public:
     for (int i = 0 ; i < RAND_SIZE*numThreads; i++){
      randomNumbers[i] = distribution(generator);
     }
+
+#pragma omp target update to(RTEnvd)
   }
 
   ~ApproxRuntimeConfiguration(){
@@ -182,3 +216,19 @@ const float approx_rt_get_percentage(){
 const int approx_rt_get_step(){
   return RTEnv.perfoStep;
 }
+
+#pragma omp declare target
+
+void __approx_device_memo(void (*accurateFN)(void *), void *arg, int memo_type, void *in_data, int nInputs, void *out_data, int nOutputs)
+{
+  approx_var_info_t *in_vars = (approx_var_info_t*) in_data;
+  printf("Table size: %d\n", RTEnvd.tableSize);
+  printf("I am threaddd %d\n", omp_get_thread_num());
+  int a = 5;
+  printf("A is %d\n", a);
+  // real_t val = RTEnvd.table[tid];
+  // printf("Val o: %f\n", val);
+  accurateFN(arg);
+}
+#pragma omp end declare target
+
