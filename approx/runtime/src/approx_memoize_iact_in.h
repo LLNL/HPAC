@@ -171,30 +171,33 @@ class MemoizeInput {
         void calc_distance_device(int &minIdx, real_t &minDist) {
           real_t mind[1]{std::numeric_limits<real_t>::max()};
           int minidx[1]{-1};
+          real_t dist[1]{0.0};
 
-          #pragma omp target data map(to:iSize, num_inputs) map(tofrom:mind, minidx)
+#pragma omp target data map(to:iSize, num_inputs, dist)
           {
             // TODO: How can we increase the granularity? Collapse? Won't work here because of the inner loop
-#pragma omp target teams distribute parallel for
-            {
             for (int i = 0; i < num_inputs; i++){
-              real_t dist = 0.0f;
+              dist[0] = 0;
+              #pragma omp target teams distribute parallel for reduction(+:dist[0]) default(shared)
               for (int j = 0; j < iSize; j++){
+                if(j==0) dist[0] = 0;
                 if (inTabWr(i,j) != 0.0f)
-                  dist += fabs((iTemp[j] - inTabWr(i,j))/inTabWr(i,j));
+                  dist[0] += fabs((iTemp[j] - inTabWr(i,j))/inTabWr(i,j));
                 else
-                  dist += fabs((iTemp[j] - inTabWr(i,j)));
+                  dist[0] += fabs((iTemp[j] - inTabWr(i,j)));
               }
-              dist = dist/(real_t)iSize;
-              if (dist < mind[0]){
-                mind[0] = dist;
+              #pragma omp target update from(dist)
+              dist[0] = dist[0]/(real_t)iSize;
+              if (dist[0] < mind[0]){
+                mind[0] = dist[0];
                 minidx[0] = i;
               }
-            }
-          }
-          }
           minDist = mind[0];
           minIdx = minidx[0];
+          if(minDist < threshold)
+            break;
+            }
+          }
         }
 
         void execute_both(void *args, approx_var_info_t *inputs, approx_var_info_t *outputs){
