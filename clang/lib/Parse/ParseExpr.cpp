@@ -2002,8 +2002,9 @@ Parser::ParsePostfixExpressionSuffix(ExprResult LHS) {
         if (ColonLocFirst.isValid() || ColonLocSecond.isValid()) {
           if (inApproxScope){
             assert(ColonLocFirst.isValid() && "Strided access not supported in HPAC");
-            LHS = Actions.ActOnApproxArraySectionExpr(LHS.get(), Loc, Idx.get(),
-                                                      ColonLocFirst, Length.get(), RLoc);
+            LHS = Actions.ActOnApproxArraySectionExpr(
+                LHS.get(), Loc, ArgExprs.empty() ? nullptr: ArgExprs[0],
+                ColonLocFirst, Length.get(), RLoc);
           }else{
             LHS = Actions.ActOnOMPArraySectionExpr(
                 LHS.get(), Loc, ArgExprs.empty() ? nullptr : ArgExprs[0],
