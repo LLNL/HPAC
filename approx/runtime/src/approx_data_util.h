@@ -135,7 +135,6 @@ void cast_and_assign(void *src, size_t numElements,
   return;
 }
 
-
 template<typename T>
 void convertTo(T *dest, void *src, size_t numElements,
                       ApproxType Type) {
@@ -163,6 +162,37 @@ void convertTo(T *dest, void *src, size_t numElements,
   }
   return;
 }
+
+#pragma omp declare target
+template<typename T>
+void convertToSingleWithOffset(T *dest, void *src, size_t dest_offset,
+                               size_t src_offset, ApproxType Type){
+    switch (Type) {
+#define APPROX_TYPE(Enum, CType, nameOfType)                                   \
+  case Enum:                                                                   \
+    dest[dest_offset] = (T)((CType *)src)[src_offset];                         \
+    return;
+#include "clang/Basic/approxTypes.def"
+    case INVALID:
+      break;
+    }
+}
+
+template<typename T>
+void convertFromSingleWithOffset(void *dest, T *src, size_t dest_offset,
+                               size_t src_offset, ApproxType Type){
+    switch (Type) {
+#define APPROX_TYPE(Enum, CType, nameOfType)                                   \
+  case Enum:                                                                   \
+    ((CType*)dest)[dest_offset] = (T)src[src_offset];        \
+    return;
+#include "clang/Basic/approxTypes.def"
+    case INVALID:
+      break;
+    }
+}
+
+#pragma omp end declare target
 
 template<typename T>
 void convertFrom(void *dest, T *src, size_t numElements, ApproxType Type){
