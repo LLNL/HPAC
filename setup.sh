@@ -61,7 +61,7 @@ if [ ! -f $approx_runtime_lib ]; then
   CC=clang CPP=clang++ cmake -G Ninja \
       -DCMAKE_INSTALL_PREFIX=$prefix \
       -DLLVM_EXTERNAL_CLANG_SOURCE_DIR=${current_dir}/clang/ \
-      -DPACKAGE_VERSION=14.0.5 \
+      -DPACKAGE_VERSION=15.0.0 \
 	  -DLIBAPPROX_ENABLE_SHARED=0 \
      ../approx
     ninja -j $threads
