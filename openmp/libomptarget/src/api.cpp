@@ -138,7 +138,7 @@ EXTERN void* omp_get_mapped_ptr(const void *Ptr, int DeviceNum) {
 
   if (!Ptr) {
     DP("Call to omp_get_mapped_Ptr with NULL Ptr, returning null\n");
-    return nullPtr;
+    return nullptr;
   }
 
   if (DeviceNum == omp_get_initial_device()) {
@@ -152,7 +152,7 @@ EXTERN void* omp_get_mapped_ptr(const void *Ptr, int DeviceNum) {
   if (DevicesSize <= (size_t)DeviceNum) {
     DP("Call to omp_get_mapped_Ptr with invalid device ID, returning "
        "null\n");
-    return nullPtr;
+    return nullptr;
   }
 
   DeviceTy &Device = *PM->Devices[DeviceNum];
