@@ -18,6 +18,7 @@
 #include <cstdlib>
 #include <chrono>
 #include <unordered_map>
+#include <algorithm>
 #include <random>
 #include <omp.h>
 
@@ -44,27 +45,32 @@ enum ExecuteMode: uint8_t{
 class ApproxRuntimeDevDataEnv{
 
 public:
+  char *inputIdx;
   int tableSize;
-  real_t *table;
-  ApproxRuntimeDevDataEnv() {
-    tableSize = 5;
-    const char *env_p = std::getenv("TABLE_SIZE");
-    printf( "HELLO WORLD\n");
-    if(env_p){
-      tableSize = atoi(env_p);
-    } else {
-      std::cerr << "ERROR: No tablesize provided via the 'TABLE_SIZE' environment variable.\n";
-      std::abort();
-    }
-
-    table = new real_t[tableSize];
-
-#pragma omp target enter data map(to:this[:1], tableSize, table[0:tableSize])
+  real_t *iTable;
+  real_t *oTable;
+  ApproxRuntimeDevDataEnv() = default;
+  ~ApproxRuntimeDevDataEnv(){
+    if(iTable)
+      delete[] iTable;
+    if(oTable)
+      delete[] oTable;
   }
 
-  // ~ApproxRuntimeDevDataEnv() {
-  //   delete[] table;
-  // }
+  void resetTable(int _tableSize){
+    tableSize = _tableSize;
+    inputIdx = new char[tableSize];
+    iTable = new real_t[tableSize];
+    oTable = new real_t[tableSize];
+
+    std::fill(inputIdx, inputIdx+tableSize, 0);
+
+#pragma omp target enter data map(to:this[:1], inputIdx[0:tableSize], tableSize, iTable[0:tableSize], oTable[0:tableSize])
+  }
+
+  void updateDevCopy(){
+#pragma omp target update to(this[:1], inputIdx[0:tableSize], tableSize, iTable[0:tableSize], oTable[0:tableSize])
+  }
 };
 
 ApproxRuntimeDevDataEnv RTEnvd = ApproxRuntimeDevDataEnv();
@@ -150,7 +156,8 @@ public:
      randomNumbers[i] = distribution(generator);
     }
 
-#pragma omp target update to(RTEnvd)
+    RTEnvd.resetTable(tableSize);
+    RTEnvd.updateDevCopy();
   }
 
   ~ApproxRuntimeConfiguration(){
@@ -222,13 +229,30 @@ const int approx_rt_get_step(){
 void __approx_device_memo(void (*accurateFN)(void *), void *arg, int memo_type, void *in_data, int nInputs, void *out_data, int nOutputs)
 {
   approx_var_info_t *in_vars = (approx_var_info_t*) in_data;
-  printf("Table size: %d\n", RTEnvd.tableSize);
-  printf("I am threaddd %d\n", omp_get_thread_num());
-  int a = 5;
-  printf("A is %d\n", a);
-  // real_t val = RTEnvd.table[tid];
-  // printf("Val o: %f\n", val);
-  accurateFN(arg);
+  approx_var_info_t *out_vars = (approx_var_info_t*) out_data;
+  // FIXME: enforce uniform team size
+  int tid_global = omp_get_thread_num() + omp_get_team_num() * omp_get_num_threads();
+  real_t val = RTEnvd.iTable[tid_global];
+  for(int i = tid_global; i < in_vars[0].num_elem; i += omp_get_num_teams() * omp_get_num_threads())
+    {
+      if(RTEnvd.inputIdx[i] && ((real_t*)in_vars[0].ptr)[i] == val)
+        {
+          convertFromSingleWithOffset(out_vars[0].ptr,
+                                      RTEnvd.oTable,
+                                      i, i,
+                                      (ApproxType) out_vars[0].data_type
+                                      );
+        }
+      else
+        {
+          accurateFN(arg);
+          convertToSingleWithOffset(RTEnvd.iTable, in_vars[0].ptr, i, i,
+                                    (ApproxType) in_vars[0].data_type);
+          convertToSingleWithOffset(RTEnvd.oTable, out_vars[0].ptr, i, i,
+                                    (ApproxType) out_vars[0].data_type);
+          RTEnvd.inputIdx[i] = 1;
+        }
+    }
 }
 #pragma omp end declare target
 
