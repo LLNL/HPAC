@@ -247,53 +247,31 @@ void __approx_device_memo(void (*accurateFN)(void *), void *arg, int memo_type, 
 {
   approx_var_info_t *in_vars = (approx_var_info_t*) in_data;
   approx_var_info_t *out_vars = (approx_var_info_t*) out_data;
-  // FIXME: enforce uniform team size
   int tid_global = omp_get_thread_num() + omp_get_team_num() * omp_get_num_threads();
-  // int grid_size = omp_get_num_teams() * omp_get_num_threads();
-  int grid_size = omp_get_num_teams() * omp_get_num_threads();
-  real_t val = RTEnvd.iTable[tid_global];
   int offset = 0;
-  real_t dists[5]{0, 0, 0, 0, 0};
-  real_t my_dist = 0;
-#pragma omp allocate(dists) allocator(omp_pteam_mem_alloc)
+  real_t dist_total = 0;
 
   for(int j = 0; j < nInputs; j++)
     {
-      for(int i = tid_global; i < in_vars[j].num_elem; i += grid_size)
+      for(int i = 0; i < in_vars[j].num_elem; i++)
         {
           if(RTEnvd.inputIdx[i] == 1)
             {
-              real_t tab_val = RTEnvd.iTable[offset+i];
+              real_t tab_val = RTEnvd.iTable[i+offset];
               real_t in_val = ((real_t*)in_vars[j].ptr)[i];
               real_t in_val_conv = 0;
               convertToSingleWithOffset(&in_val_conv, in_vars[j].ptr, 0, i, (ApproxType) in_vars[j].data_type);
             real_t dist = fabs(RTEnvd.iTable[offset+i] - in_val_conv);
-          // if(dist > 0.00001f)
-            // {printf("Dist is %f, for thread %d iter [%d,%d] offset %d table val %f in_val %f in_val int %d converted %f\n", dist, omp_get_thread_num(), j,i,offset, tab_val, in_val, ((int*)in_vars[j].ptr)[i],in_val_conv);}
-            my_dist += dist;
+            dist_total += dist;
             }
         }
-
-      #pragma omp atomic
-      dists[0] += my_dist;
-      #pragma omp atomic update
-      dists[1] += 1;
       offset += in_vars[j].num_elem;
     }
 
-#pragma omp flush(dists[0:2])
-  while(dists[1] != omp_get_num_threads());
-
-  real_t dist_total = dists[0];
-
   if(RTEnvd.inputIdx[tid_global] == 1 && dist_total < 1000)
     {
-      // if(omp_get_thread_num() == 0 && omp_get_team_num() == 0)
-        // printf("Approximately\n");
-
-      for(int i = tid_global; i < out_vars[0].num_elem; i += grid_size)
+      for(int i = 0; i < out_vars[0].num_elem; i++)
         {
-          if(RTEnvd.inputIdx[i] == 0) continue;
           convertFromSingleWithOffset(out_vars[0].ptr,
                                       RTEnvd.oTable,
                                       i, i,
@@ -303,34 +281,26 @@ void __approx_device_memo(void (*accurateFN)(void *), void *arg, int memo_type, 
     }
   else
     {
-
-      // if(omp_get_thread_num() == 0 && omp_get_team_num() == 0)
-        // printf("Accurately\n");
-      // we know that this thread can calculate accurate_fn without any issues
       accurateFN(arg);
       offset = 0;
 
-      // but we need toe xplicitly map input space to threads
       for(int j = 0; j < nInputs; j++)
         {
-          for(int i = tid_global; i < in_vars[j].num_elem; i += grid_size)
+          for(int i = 0; i < in_vars[j].num_elem; i++)
             {
-              convertToSingleWithOffset(RTEnvd.iTable, in_vars[j].ptr, i+offset, i,
+              convertToSingleWithOffset(RTEnvd.iTable, in_vars[j].ptr, i+offset+tid_global, i,
                                         (ApproxType) in_vars[j].data_type);
             }
 
           offset += in_vars[j].num_elem;
         }
 
-      // race condition here: we can copy values that have not yet been calculated
       // TODO: this should be size_t
-      for(size_t i = tid_global; i < out_vars[0].num_elem; i += grid_size)
+      for(size_t i = 0; i < out_vars[0].num_elem; i++)
         {
-
-          // printf("INNER: Thread %d writing output value %d, gridsize %d\n", tid_global, i, grid_size);
-          convertToSingleWithOffset(RTEnvd.oTable, out_vars[0].ptr, i, i,
+          convertToSingleWithOffset(RTEnvd.oTable, out_vars[0].ptr, i+tid_global, i,
                                     (ApproxType) out_vars[0].data_type);
-          RTEnvd.inputIdx[i] = 1;
+          RTEnvd.inputIdx[i+tid_global] = 1;
         }
     }
 
