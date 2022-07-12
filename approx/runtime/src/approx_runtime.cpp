@@ -91,7 +91,6 @@ void resetDeviceTable(int newSize){
 
   RTEnvd.destruct();
   RTEnvd.resetTable(tabSize);
-  RTEnvd.updateDevCopy();
 }
 
 
@@ -100,6 +99,7 @@ class ApproxRuntimeConfiguration{
 public:
   bool ExecuteBoth;
   int tableSize;
+  int offloadTableSize;
   float threshold;
   int historySize;
   int predictionSize;
@@ -133,6 +133,12 @@ public:
     env_p = std::getenv("TABLE_SIZE");
     if (env_p){
       tableSize = atoi(env_p);
+    }
+
+    offloadTableSize = 0;
+    env_p = std::getenv("OFFLOAD_TABLE_SIZE");
+    if (env_p){
+      offloadTableSize = atoi(env_p);
     }
 
     env_p = std::getenv("PREDICTION_SIZE");
@@ -173,8 +179,7 @@ public:
      randomNumbers[i] = distribution(generator);
     }
 
-    RTEnvd.resetTable(tableSize);
-    RTEnvd.updateDevCopy();
+    RTEnvd.resetTable(offloadTableSize);
   }
 
   ~ApproxRuntimeConfiguration(){
