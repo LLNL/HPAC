@@ -173,10 +173,11 @@ class MemoizeInput {
           int minidx[1]{-1};
           real_t dist[1]{0.0};
 
-#pragma omp target data map(to:iSize, num_inputs, dist)
+#pragma omp target data map(to:iSize, num_inputs, dist[0:1])
           {
             // TODO: How can we increase the granularity? Collapse? Won't work here because of the inner loop
-            for (int i = 0; i < num_inputs; i++){
+            // we can maybe submit the kernels in parallel
+            for (int i = 0; i < input_index; i++){
               dist[0] = 0;
               #pragma omp target teams distribute parallel for reduction(+:dist[0]) default(shared)
               for (int j = 0; j < iSize; j++){
@@ -186,18 +187,18 @@ class MemoizeInput {
                 else
                   dist[0] += fabs((iTemp[j] - inTabWr(i,j)));
               }
-              #pragma omp target update from(dist)
+              #pragma omp target update from(dist[0:1])
               dist[0] = dist[0]/(real_t)iSize;
               if (dist[0] < mind[0]){
                 mind[0] = dist[0];
                 minidx[0] = i;
               }
-          minDist = mind[0];
-          minIdx = minidx[0];
           if(minDist < threshold)
             break;
             }
           }
+          minDist = mind[0];
+          minIdx = minidx[0];
         }
 
         void execute_both(void *args, approx_var_info_t *inputs, approx_var_info_t *outputs){
