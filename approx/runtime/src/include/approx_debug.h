@@ -16,7 +16,8 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
-void resetDeviceTable(int newSize = -1);
+void resetDeviceTable(int newSize = -1, float threshold = -1.0);
+float getDeviceThreshold();
 #ifdef __cplusplus
 }
 #endif

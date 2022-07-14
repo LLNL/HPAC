@@ -47,16 +47,19 @@ enum ExecuteMode: uint8_t{
 class ApproxRuntimeDevDataEnv{
 
 public:
-  char *inputIdx;
-  int *tableSize;
-  real_t *iTable;
-  real_t *oTable;
+  char *inputIdx = nullptr;
+  int *tableSize = nullptr;
+  float *threshold = nullptr;
+  real_t *iTable = nullptr;
+  real_t *oTable = nullptr;
   ApproxRuntimeDevDataEnv() = default;
 
-  void resetTable(int _tableSize){
+  void resetTable(int _tableSize, float _threshold){
     destruct();
     tableSize = new int[1];
+    threshold = new float[1];
     tableSize[0] = _tableSize;
+    threshold[0] = _threshold;
     inputIdx = new char[*tableSize];
     iTable = new real_t[*tableSize];
     oTable = new real_t[*tableSize];
@@ -66,6 +69,8 @@ public:
 
   // allow explicit destruction.
   void destruct(){
+    delete[] tableSize;
+    delete[] threshold;
     delete[] inputIdx;
     delete[] iTable;
     delete[] oTable;
@@ -75,15 +80,25 @@ public:
 ApproxRuntimeDevDataEnv RTEnvd = ApproxRuntimeDevDataEnv();
 #pragma omp end declare target
 
-void resetDeviceTable(int newSize){
+void resetDeviceTable(int newSize, float newThresh){
   int tabSize = newSize == -1 ? *RTEnvd.tableSize : newSize;
+  float threshold = newThresh == -1.0 ? *RTEnvd.threshold : newThresh;
 
-#pragma omp target exit data map(delete:RTEnvd, RTEnvd.tableSize[0:1], RTEnvd.inputIdx[0:tabSize], RTEnvd.iTable[0:tabSize], RTEnvd.oTable[0:tabSize])
-    RTEnvd.resetTable(tabSize);
-#pragma omp target enter data map(to:RTEnvd, RTEnvd.tableSize[0:1], RTEnvd.inputIdx[0:tabSize], RTEnvd.iTable[0:tabSize], RTEnvd.oTable[0:tabSize])
+  if(omp_target_is_present(RTEnvd.tableSize, 0))
+    {
+      int oldTabSize = *RTEnvd.tableSize;
+      #pragma omp target exit data map(delete:RTEnvd, RTEnvd.tableSize[0:1], RTEnvd.threshold[0:1], RTEnvd.inputIdx[0:oldTabSize], RTEnvd.iTable[0:oldTabSize], RTEnvd.oTable[0:oldTabSize])
+    }
+  RTEnvd.resetTable(tabSize, threshold);
+#pragma omp target enter data map(to:RTEnvd, RTEnvd.tableSize[0:1], RTEnvd.threshold[0:1], RTEnvd.inputIdx[0:tabSize], RTEnvd.iTable[0:tabSize], RTEnvd.oTable[0:tabSize])
 
 }
 
+float getDeviceThreshold(){
+  if(RTEnvd.threshold)
+    return *RTEnvd.threshold;
+  return -1.0;
+}
 
 class ApproxRuntimeConfiguration{
   ExecuteMode Mode;
@@ -170,7 +185,7 @@ public:
      randomNumbers[i] = distribution(generator);
     }
 
-    resetDeviceTable(offloadTableSize);
+    resetDeviceTable(offloadTableSize, threshold);
   }
 
   ~ApproxRuntimeConfiguration(){
@@ -264,7 +279,7 @@ void __approx_device_memo(void (*accurateFN)(void *), void *arg, int memo_type, 
       offset += in_vars[j].num_elem;
     }
 
-  if(RTEnvd.inputIdx[tid_global] == 1 && dist_total < 1000)
+  if(RTEnvd.inputIdx[tid_global] == 1 && dist_total < *RTEnvd.threshold)
     {
       for(int i = 0; i < out_vars[0].num_elem; i++)
         {
