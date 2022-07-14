@@ -48,35 +48,24 @@ class ApproxRuntimeDevDataEnv{
 
 public:
   char *inputIdx;
-  int tableSize;
+  int *tableSize;
   real_t *iTable;
   real_t *oTable;
   ApproxRuntimeDevDataEnv() = default;
-  ~ApproxRuntimeDevDataEnv(){
-    if(iTable)
-      delete[] iTable;
-    if(oTable)
-      delete[] oTable;
-  }
 
   void resetTable(int _tableSize){
-    tableSize = _tableSize;
-    inputIdx = new char[tableSize];
-    iTable = new real_t[tableSize];
-    oTable = new real_t[tableSize];
+    destruct();
+    tableSize = new int[1];
+    tableSize[0] = _tableSize;
+    inputIdx = new char[*tableSize];
+    iTable = new real_t[*tableSize];
+    oTable = new real_t[*tableSize];
 
-    std::fill(inputIdx, inputIdx+tableSize, 0);
-
-#pragma omp target enter data map(to:this[:1], inputIdx[0:tableSize], tableSize, iTable[0:tableSize], oTable[0:tableSize])
-  }
-
-  void updateDevCopy(){
-#pragma omp target update to(this[:1], inputIdx[0:tableSize], tableSize, iTable[0:tableSize], oTable[0:tableSize])
+    std::fill(inputIdx, inputIdx+*tableSize, 0);
   }
 
   // allow explicit destruction.
   void destruct(){
-   #pragma omp target exit data map(delete:this[:1], inputIdx[0:tableSize], tableSize, iTable[0:tableSize], oTable[0:tableSize])
     delete[] inputIdx;
     delete[] iTable;
     delete[] oTable;
@@ -87,10 +76,12 @@ ApproxRuntimeDevDataEnv RTEnvd = ApproxRuntimeDevDataEnv();
 #pragma omp end declare target
 
 void resetDeviceTable(int newSize){
-  int tabSize = newSize == -1 ? RTEnvd.tableSize : newSize;
+  int tabSize = newSize == -1 ? *RTEnvd.tableSize : newSize;
 
-  RTEnvd.destruct();
-  RTEnvd.resetTable(tabSize);
+#pragma omp target exit data map(delete:RTEnvd, RTEnvd.tableSize[0:1], RTEnvd.inputIdx[0:tabSize], RTEnvd.iTable[0:tabSize], RTEnvd.oTable[0:tabSize])
+    RTEnvd.resetTable(tabSize);
+#pragma omp target enter data map(to:RTEnvd, RTEnvd.tableSize[0:1], RTEnvd.inputIdx[0:tabSize], RTEnvd.iTable[0:tabSize], RTEnvd.oTable[0:tabSize])
+
 }
 
 
@@ -179,7 +170,7 @@ public:
      randomNumbers[i] = distribution(generator);
     }
 
-    RTEnvd.resetTable(offloadTableSize);
+    resetDeviceTable(offloadTableSize);
   }
 
   ~ApproxRuntimeConfiguration(){
