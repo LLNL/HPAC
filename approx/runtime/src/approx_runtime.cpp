@@ -64,6 +64,8 @@ public:
     oSize = new size_t[1];
     tableSize[0] = _tableSize;
     threshold[0] = _threshold;
+    iSize[0] = _iput_size;
+    oSize[0] = _oput_size;
     inputIdx = new char[*tableSize];
     iTable = new real_t[*tableSize];
     oTable = new real_t[*tableSize];
@@ -270,31 +272,41 @@ void __approx_device_memo(void (*accurateFN)(void *), void *arg, int memo_type, 
   int tid_global = omp_get_thread_num() + omp_get_team_num() * omp_get_num_threads();
   int offset = 0;
   real_t dist_total = 0;
+  int entry_index = -1;
 
-  for(int j = 0; j < nInputs; j++)
+  // TODO: Because of temp. locality, may be better to loop down
+  for(int k = 0; k < RTEnvd.inputIdx[tid_global]; k++)
     {
-      for(int i = 0; i < in_vars[j].num_elem; i++)
+      dist_total = 0;
+      offset = 0;
+      for(int j = 0; j < nInputs; j++)
         {
-          if(RTEnvd.inputIdx[i] == 1)
+          for(int i = 0; i < in_vars[j].num_elem; i++)
             {
-              real_t tab_val = RTEnvd.iTable[i+offset];
+              real_t tab_val = RTEnvd.iTable[(k*(*RTEnvd.iSize))+i+offset];
               real_t in_val = ((real_t*)in_vars[j].ptr)[i];
               real_t in_val_conv = 0;
               convertToSingleWithOffset(&in_val_conv, in_vars[j].ptr, 0, i, (ApproxType) in_vars[j].data_type);
-            real_t dist = fabs(RTEnvd.iTable[offset+i] - in_val_conv);
-            dist_total += dist;
+              real_t dist = fabs(RTEnvd.iTable[(k*(*RTEnvd.iSize))+offset+i] - in_val_conv);
+              dist_total += dist;
             }
+          offset += in_vars[j].num_elem;
         }
-      offset += in_vars[j].num_elem;
+      // TODO: is divergence an issue?
+      if(dist_total < *RTEnvd.threshold)
+        {
+          entry_index = k;
+          break;
+        }
     }
 
-  if(RTEnvd.inputIdx[tid_global] == 1 && dist_total < *RTEnvd.threshold)
+  if(entry_index != -1 && dist_total < *RTEnvd.threshold)
     {
       for(int i = 0; i < out_vars[0].num_elem; i++)
         {
           convertFromSingleWithOffset(out_vars[0].ptr,
                                       RTEnvd.oTable,
-                                      i, i,
+                                      i, i+(*RTEnvd.oSize*entry_index),
                                       (ApproxType) out_vars[0].data_type
                                       );
         }
@@ -303,12 +315,14 @@ void __approx_device_memo(void (*accurateFN)(void *), void *arg, int memo_type, 
     {
       accurateFN(arg);
       offset = 0;
+      // TODO: Update to be min(num_rows, what is currently below)
+      entry_index = RTEnvd.inputIdx[tid_global];
 
       for(int j = 0; j < nInputs; j++)
         {
           for(int i = 0; i < in_vars[j].num_elem; i++)
             {
-              convertToSingleWithOffset(RTEnvd.iTable, in_vars[j].ptr, i+offset+tid_global, i,
+              convertToSingleWithOffset(RTEnvd.iTable, in_vars[j].ptr, i+offset+tid_global+(*RTEnvd.iSize*entry_index), i,
                                         (ApproxType) in_vars[j].data_type);
             }
 
@@ -318,9 +332,9 @@ void __approx_device_memo(void (*accurateFN)(void *), void *arg, int memo_type, 
       // TODO: this should be size_t
       for(size_t i = 0; i < out_vars[0].num_elem; i++)
         {
-          convertToSingleWithOffset(RTEnvd.oTable, out_vars[0].ptr, i+tid_global, i,
+          RTEnvd.inputIdx[i+tid_global] += 1;
+          convertToSingleWithOffset(RTEnvd.oTable, out_vars[0].ptr, i+tid_global+(*RTEnvd.oSize*entry_index), i,
                                     (ApproxType) out_vars[0].data_type);
-          RTEnvd.inputIdx[i+tid_global] = 1;
         }
     }
 
