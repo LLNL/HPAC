@@ -48,16 +48,20 @@ class ApproxRuntimeDevDataEnv{
 
 public:
   char *inputIdx = nullptr;
+  size_t *iSize = nullptr;
+  size_t *oSize = nullptr;
   int *tableSize = nullptr;
   float *threshold = nullptr;
   real_t *iTable = nullptr;
   real_t *oTable = nullptr;
   ApproxRuntimeDevDataEnv() = default;
 
-  void resetTable(int _tableSize, float _threshold){
+  void resetTable(int _tableSize, float _threshold, size_t _iput_size, size_t _oput_size){
     destruct();
     tableSize = new int[1];
     threshold = new float[1];
+    iSize = new size_t[1];
+    oSize = new size_t[1];
     tableSize[0] = _tableSize;
     threshold[0] = _threshold;
     inputIdx = new char[*tableSize];
@@ -71,6 +75,8 @@ public:
   void destruct(){
     delete[] tableSize;
     delete[] threshold;
+    delete[] iSize;
+    delete[] oSize;
     delete[] inputIdx;
     delete[] iTable;
     delete[] oTable;
@@ -80,17 +86,19 @@ public:
 ApproxRuntimeDevDataEnv RTEnvd = ApproxRuntimeDevDataEnv();
 #pragma omp end declare target
 
-void resetDeviceTable(int newSize, float newThresh){
+void resetDeviceTable(int newSize, float newThresh, size_t newiSize, size_t newoSize){
   int tabSize = newSize == -1 ? *RTEnvd.tableSize : newSize;
   float threshold = newThresh == -1.0 ? *RTEnvd.threshold : newThresh;
+  size_t iSize = newiSize == -1 ? *RTEnvd.iSize : newiSize;
+  size_t oSize = newoSize == -1 ? *RTEnvd.oSize : newoSize;
 
   if(omp_target_is_present(RTEnvd.tableSize, 0))
     {
       int oldTabSize = *RTEnvd.tableSize;
-      #pragma omp target exit data map(delete:RTEnvd, RTEnvd.tableSize[0:1], RTEnvd.threshold[0:1], RTEnvd.inputIdx[0:oldTabSize], RTEnvd.iTable[0:oldTabSize], RTEnvd.oTable[0:oldTabSize])
+#pragma omp target exit data map(delete:RTEnvd, RTEnvd.tableSize[0:1], RTEnvd.threshold[0:1], RTEnvd.iSize[0:1], RTEnvd.oSize[0:1], RTEnvd.inputIdx[0:oldTabSize], RTEnvd.iTable[0:oldTabSize], RTEnvd.oTable[0:oldTabSize])
     }
-  RTEnvd.resetTable(tabSize, threshold);
-#pragma omp target enter data map(to:RTEnvd, RTEnvd.tableSize[0:1], RTEnvd.threshold[0:1], RTEnvd.inputIdx[0:tabSize], RTEnvd.iTable[0:tabSize], RTEnvd.oTable[0:tabSize])
+  RTEnvd.resetTable(tabSize, threshold, iSize, oSize);
+#pragma omp target enter data map(to:RTEnvd, RTEnvd.tableSize[0:1], RTEnvd.threshold[0:1], RTEnvd.iSize[0:1], RTEnvd.oSize[0:1], RTEnvd.inputIdx[0:tabSize], RTEnvd.iTable[0:tabSize], RTEnvd.oTable[0:tabSize])
 
 }
 
@@ -185,7 +193,8 @@ public:
      randomNumbers[i] = distribution(generator);
     }
 
-    resetDeviceTable(offloadTableSize, threshold);
+    // TODO: Initial device params from the environment
+    resetDeviceTable(offloadTableSize, threshold, 0, 0);
   }
 
   ~ApproxRuntimeConfiguration(){
