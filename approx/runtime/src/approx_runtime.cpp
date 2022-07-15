@@ -51,37 +51,34 @@ public:
   size_t *iSize = nullptr;
   size_t *oSize = nullptr;
   int *tabNumEntries = nullptr;
-  int *tableSize = nullptr;
   float *threshold = nullptr;
   real_t *iTable = nullptr;
   real_t *oTable = nullptr;
   ApproxRuntimeDevDataEnv() = default;
 
-  void resetTable(int _tableSize, float _threshold, size_t _iput_size, size_t _oput_size, int _numTableEntries){
+  void resetTable(float _threshold, size_t _iput_size, size_t _oput_size, int _numTableEntries){
     destruct();
-    tableSize = new int[1];
     threshold = new float[1];
     iSize = new size_t[1];
     oSize = new size_t[1];
     tabNumEntries = new int[1];
     tabNumEntries[0] = _numTableEntries;
-    tableSize[0] = _tableSize;
     threshold[0] = _threshold;
     iSize[0] = _iput_size;
     oSize[0] = _oput_size;
-    inputIdx = new char[*tableSize];
-    iTable = new real_t[*tableSize*_numTableEntries];
-    oTable = new real_t[*tableSize*_numTableEntries];
+    inputIdx = new char[_iput_size];
+    iTable = new real_t[_iput_size*_numTableEntries];
+    oTable = new real_t[_oput_size*_numTableEntries];
 
-    std::fill(inputIdx, inputIdx+*tableSize, 0);
+    std::fill(inputIdx, inputIdx+_iput_size, 0);
   }
 
   // allow explicit destruction.
   void destruct(){
-    delete[] tableSize;
     delete[] threshold;
     delete[] iSize;
     delete[] oSize;
+    delete[] tabNumEntries;
     delete[] inputIdx;
     delete[] iTable;
     delete[] oTable;
@@ -91,20 +88,21 @@ public:
 ApproxRuntimeDevDataEnv RTEnvd = ApproxRuntimeDevDataEnv();
 #pragma omp end declare target
 
-void resetDeviceTable(int newSize, float newThresh, size_t newiSize, size_t newoSize, int newNumTabEntries){
-  int tabSize = newSize == -1 ? *RTEnvd.tableSize : newSize;
+void resetDeviceTable(float newThresh, size_t newiSize, size_t newoSize, int newNumTabEntries){
   float threshold = newThresh == -1.0 ? *RTEnvd.threshold : newThresh;
   size_t iSize = newiSize == -1 ? *RTEnvd.iSize : newiSize;
   size_t oSize = newoSize == -1 ? *RTEnvd.oSize : newoSize;
   int numTabEntries = newNumTabEntries == -1 ? *RTEnvd.tabNumEntries : newNumTabEntries;
 
-  if(omp_target_is_present(RTEnvd.tableSize, 0))
+  if(omp_target_is_present(RTEnvd.iSize, 0))
     {
-      int oldTabSize = *RTEnvd.tableSize;
-#pragma omp target exit data map(delete:RTEnvd, RTEnvd.tableSize[0:1], RTEnvd.threshold[0:1], RTEnvd.tabNumEntries[0:1], RTEnvd.iSize[0:1], RTEnvd.oSize[0:1], RTEnvd.inputIdx[0:oldTabSize], RTEnvd.iTable[0:oldTabSize], RTEnvd.oTable[0:oldTabSize])
+      size_t oldInSize = *RTEnvd.iSize;
+      size_t oldOutSize = *RTEnvd.oSize;
+      int oldNumEntries = *RTEnvd.tabNumEntries;
+#pragma omp target exit data map(delete:RTEnvd, RTEnvd.threshold[0:1], RTEnvd.tabNumEntries[0:1], RTEnvd.iSize[0:1], RTEnvd.oSize[0:1], RTEnvd.inputIdx[0:oldInSize], RTEnvd.iTable[0:oldInSize*oldNumEntries], RTEnvd.oTable[0:oldOutSize*oldNumEntries])
     }
-  RTEnvd.resetTable(tabSize, threshold, iSize, oSize, numTabEntries);
-#pragma omp target enter data map(to:RTEnvd, RTEnvd.tableSize[0:1], RTEnvd.threshold[0:1], RTEnvd.tabNumEntries[0:1], RTEnvd.iSize[0:1], RTEnvd.oSize[0:1], RTEnvd.inputIdx[0:tabSize], RTEnvd.iTable[0:tabSize], RTEnvd.oTable[0:tabSize])
+  RTEnvd.resetTable(threshold, iSize, oSize, numTabEntries);
+#pragma omp target enter data map(to:RTEnvd, RTEnvd.threshold[0:1], RTEnvd.tabNumEntries[0:1], RTEnvd.iSize[0:1], RTEnvd.oSize[0:1], RTEnvd.inputIdx[0:iSize], RTEnvd.iTable[0:iSize*numTabEntries], RTEnvd.oTable[0:oSize*numTabEntries])
 
 }
 
@@ -119,7 +117,8 @@ class ApproxRuntimeConfiguration{
 public:
   bool ExecuteBoth;
   int tableSize;
-  int offloadTableSize;
+  int offloadTableISize;
+  int offloadTableOSize;
   float threshold;
   int historySize;
   int predictionSize;
@@ -155,11 +154,18 @@ public:
       tableSize = atoi(env_p);
     }
 
-    offloadTableSize = 0;
-    env_p = std::getenv("OFFLOAD_TABLE_SIZE");
+    offloadTableISize = 0;
+    env_p = std::getenv("OFFLOAD_TABLE_IN_SIZE");
     if (env_p){
-      offloadTableSize = atoi(env_p);
+      offloadTableISize = atoi(env_p);
     }
+
+    offloadTableOSize = 0;
+    env_p = std::getenv("OFFLOAD_TABLE_OUT_SIZE");
+    if (env_p){
+      offloadTableOSize = atoi(env_p);
+    }
+
 
     env_p = std::getenv("PREDICTION_SIZE");
     if (env_p) {
@@ -199,9 +205,8 @@ public:
      randomNumbers[i] = distribution(generator);
     }
 
-    // TODO: Initial device params from the environment
     // TODO: Initial num table entries from the environment
-    resetDeviceTable(offloadTableSize, threshold, 0, 0, 3);
+    resetDeviceTable(threshold, offloadTableISize, offloadTableOSize, tableSize);
   }
 
   ~ApproxRuntimeConfiguration(){
@@ -290,13 +295,13 @@ void __approx_device_memo(void (*accurateFN)(void *), void *arg, int memo_type, 
       o_tab_offset += out_vars[i].num_elem;
     }
 
-  // assume every thread is preceded by the same number of inputs and outputs
+  // assume all of a thread's predecessors have the same number of inputs and outputs
   // this assumption is valid even if the last thread does fewer iterations of the loop
   i_tab_offset *= tid_global;
   o_tab_offset *= tid_global;
 
   // TODO: Because of temp. locality, may be better to loop down
-  for(int k = 0; k < RTEnvd.inputIdx[tid_global]; k++)
+  for(int k = 0; k < RTEnvd.inputIdx[i_tab_offset]; k++)
     {
       dist_total = 0;
       offset = 0;
@@ -342,7 +347,7 @@ void __approx_device_memo(void (*accurateFN)(void *), void *arg, int memo_type, 
       offset = 0;
       accurateFN(arg);
       // TODO: Update to be min(num_rows, what is currently below)
-      entry_index = RTEnvd.inputIdx[tid_global];
+      entry_index = RTEnvd.inputIdx[i_tab_offset];
 
       for(int j = 0; j < nInputs; j++)
         {
@@ -361,7 +366,7 @@ void __approx_device_memo(void (*accurateFN)(void *), void *arg, int memo_type, 
         {
           for(size_t i = 0; i < out_vars[j].num_elem; i++)
             {
-              RTEnvd.inputIdx[offset+i+tid_global] += 1;
+              RTEnvd.inputIdx[i_tab_offset+offset+i] += 1;
               convertToSingleWithOffset(RTEnvd.oTable, out_vars[j].ptr, offset+i+o_tab_offset+(*RTEnvd.oSize*entry_index), i,
                                         (ApproxType) out_vars[j].data_type);
             }
