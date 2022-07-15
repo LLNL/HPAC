@@ -273,6 +273,22 @@ void __approx_device_memo(void (*accurateFN)(void *), void *arg, int memo_type, 
   int offset = 0;
   real_t dist_total = 0;
   int entry_index = -1;
+  size_t i_tab_offset = 0;
+  size_t o_tab_offset = 0;
+  for(int i = 0; i < nInputs; i++)
+    {
+      i_tab_offset += in_vars[i].num_elem;
+    }
+
+  for(int i = 0; i < nOutputs; i++)
+    {
+      o_tab_offset += out_vars[i].num_elem;
+    }
+
+  // assume every thread is preceded by the same number of inputs and outputs
+  // this assumption is valid even if the last thread does fewer iterations of the loop
+  i_tab_offset *= tid_global;
+  o_tab_offset *= tid_global;
 
   // TODO: Because of temp. locality, may be better to loop down
   for(int k = 0; k < RTEnvd.inputIdx[tid_global]; k++)
@@ -283,11 +299,11 @@ void __approx_device_memo(void (*accurateFN)(void *), void *arg, int memo_type, 
         {
           for(int i = 0; i < in_vars[j].num_elem; i++)
             {
-              real_t tab_val = RTEnvd.iTable[(k*(*RTEnvd.iSize))+i+offset];
+              real_t tab_val = RTEnvd.iTable[(k*(*RTEnvd.iSize))+i+offset+i_tab_offset];
               real_t in_val = ((real_t*)in_vars[j].ptr)[i];
               real_t in_val_conv = 0;
               convertToSingleWithOffset(&in_val_conv, in_vars[j].ptr, 0, i, (ApproxType) in_vars[j].data_type);
-              real_t dist = fabs(RTEnvd.iTable[(k*(*RTEnvd.iSize))+offset+i] - in_val_conv);
+              real_t dist = fabs(RTEnvd.iTable[(k*(*RTEnvd.iSize))+offset+i+i_tab_offset] - in_val_conv);
               dist_total += dist;
             }
           offset += in_vars[j].num_elem;
@@ -302,19 +318,24 @@ void __approx_device_memo(void (*accurateFN)(void *), void *arg, int memo_type, 
 
   if(entry_index != -1 && dist_total < *RTEnvd.threshold)
     {
-      for(int i = 0; i < out_vars[0].num_elem; i++)
+      offset = 0;
+      for(int j = 0; j < nOutputs; j++)
         {
-          convertFromSingleWithOffset(out_vars[0].ptr,
-                                      RTEnvd.oTable,
-                                      i, i+(*RTEnvd.oSize*entry_index),
-                                      (ApproxType) out_vars[0].data_type
-                                      );
+          for(int i = 0; i < out_vars[j].num_elem; i++)
+            {
+              convertFromSingleWithOffset(out_vars[j].ptr,
+                                          RTEnvd.oTable,
+                                          i, i+offset+o_tab_offset+(*RTEnvd.oSize*entry_index),
+                                          (ApproxType) out_vars[j].data_type
+                                          );
+            }
+          offset += out_vars[j].num_elem;
         }
     }
   else
     {
-      accurateFN(arg);
       offset = 0;
+      accurateFN(arg);
       // TODO: Update to be min(num_rows, what is currently below)
       entry_index = RTEnvd.inputIdx[tid_global];
 
@@ -322,22 +343,26 @@ void __approx_device_memo(void (*accurateFN)(void *), void *arg, int memo_type, 
         {
           for(int i = 0; i < in_vars[j].num_elem; i++)
             {
-              convertToSingleWithOffset(RTEnvd.iTable, in_vars[j].ptr, i+offset+tid_global+(*RTEnvd.iSize*entry_index), i,
+              convertToSingleWithOffset(RTEnvd.iTable, in_vars[j].ptr, i+offset+i_tab_offset+(*RTEnvd.iSize*entry_index), i,
                                         (ApproxType) in_vars[j].data_type);
             }
 
           offset += in_vars[j].num_elem;
         }
 
+      offset = 0;
       // TODO: this should be size_t
-      for(size_t i = 0; i < out_vars[0].num_elem; i++)
+      for(int j = 0; j < nOutputs; j++)
         {
-          RTEnvd.inputIdx[i+tid_global] += 1;
-          convertToSingleWithOffset(RTEnvd.oTable, out_vars[0].ptr, i+tid_global+(*RTEnvd.oSize*entry_index), i,
-                                    (ApproxType) out_vars[0].data_type);
+          for(size_t i = 0; i < out_vars[j].num_elem; i++)
+            {
+              RTEnvd.inputIdx[offset+i+tid_global] += 1;
+              convertToSingleWithOffset(RTEnvd.oTable, out_vars[j].ptr, offset+i+o_tab_offset+(*RTEnvd.oSize*entry_index), i,
+                                        (ApproxType) out_vars[j].data_type);
+            }
+          offset += out_vars[j].num_elem;
         }
     }
-
 }
 #pragma omp end declare target
 
