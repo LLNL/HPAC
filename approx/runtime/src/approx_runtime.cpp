@@ -282,6 +282,7 @@ void __approx_device_memo(void (*accurateFN)(void *), void *arg, int memo_type, 
   int tid_global = omp_get_thread_num() + omp_get_team_num() * omp_get_num_threads();
   int offset = 0;
   real_t dist_total = 0;
+  real_t n_input_values = 0.0;
   int entry_index = -1;
   size_t i_tab_offset = 0;
   size_t o_tab_offset = 0;
@@ -295,6 +296,7 @@ void __approx_device_memo(void (*accurateFN)(void *), void *arg, int memo_type, 
       o_tab_offset += out_vars[i].num_elem;
     }
 
+  n_input_values = i_tab_offset;
   // assume all of a thread's predecessors have the same number of inputs and outputs
   // this assumption is valid even if the last thread does fewer iterations of the loop
   i_tab_offset *= tid_global;
@@ -318,6 +320,8 @@ void __approx_device_memo(void (*accurateFN)(void *), void *arg, int memo_type, 
             }
           offset += in_vars[j].num_elem;
         }
+
+      dist_total /= n_input_values;
       // TODO: is divergence an issue?
       if(dist_total < *RTEnvd.threshold)
         {
@@ -345,10 +349,9 @@ void __approx_device_memo(void (*accurateFN)(void *), void *arg, int memo_type, 
   else
     {
       offset = 0;
-      accurateFN(arg);
-      // TODO: Update to be min(num_rows, what is currently below)
       entry_index = RTEnvd.inputIdx[i_tab_offset];
 
+      // NOTE: for correctness of inout, we have to copy the input before calling accurateFN
       for(int j = 0; j < nInputs; j++)
         {
           for(int i = 0; i < in_vars[j].num_elem; i++)
@@ -360,6 +363,8 @@ void __approx_device_memo(void (*accurateFN)(void *), void *arg, int memo_type, 
           offset += in_vars[j].num_elem;
         }
 
+      accurateFN(arg);
+      // TODO: Update to be min(num_rows, what is currently below)
       offset = 0;
       // TODO: this should be size_t
       for(int j = 0; j < nOutputs; j++)
