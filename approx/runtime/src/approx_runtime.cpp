@@ -47,7 +47,7 @@ enum ExecuteMode: uint8_t{
 class ApproxRuntimeDevDataEnv{
 
 public:
-  char *inputIdx = nullptr;
+  int *inputIdx = nullptr;
   size_t *iSize = nullptr;
   size_t *oSize = nullptr;
   int *tabNumEntries = nullptr;
@@ -66,7 +66,7 @@ public:
     threshold[0] = _threshold;
     iSize[0] = _iput_size;
     oSize[0] = _oput_size;
-    inputIdx = new char[_iput_size];
+    inputIdx = new int[_iput_size];
     iTable = new real_t[_iput_size*_numTableEntries];
     oTable = new real_t[_oput_size*_numTableEntries];
 
