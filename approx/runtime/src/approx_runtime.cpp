@@ -286,6 +286,7 @@ void __approx_device_memo(void (*accurateFN)(void *), void *arg, int memo_type, 
   int entry_index = -1;
   size_t i_tab_offset = 0;
   size_t o_tab_offset = 0;
+  // FIXME: assume inputs are the same size
   for(int i = 0; i < nInputs; i++)
     {
       i_tab_offset += in_vars[i].num_elem;
@@ -299,26 +300,34 @@ void __approx_device_memo(void (*accurateFN)(void *), void *arg, int memo_type, 
   n_input_values = i_tab_offset;
   // assume all of a thread's predecessors have the same number of inputs and outputs
   // this assumption is valid even if the last thread does fewer iterations of the loop
-  i_tab_offset *= tid_global;
+  i_tab_offset *= omp_get_team_num() * omp_get_num_threads();
   o_tab_offset *= tid_global;
 
+  int n_active_threads = omp_get_num_threads();
+  int tot_input = (*RTEnvd.iSize/nInputs);
+  int input_start = (omp_get_num_threads()*(omp_get_team_num()));
+  int my_num_vals = tot_input - input_start;
+
+  if(my_num_vals < omp_get_num_threads())
+    n_active_threads = my_num_vals;
+
+
   // TODO: Because of temp. locality, may be better to loop down
-  for(int k = 0; k < RTEnvd.inputIdx[i_tab_offset]; k++)
+  for(int k = 0; k < RTEnvd.inputIdx[i_tab_offset+(omp_get_thread_num()*in_vars[0].num_elem)]; k++)
     {
-      dist_total = 0;
       offset = 0;
+      dist_total = 0;
       for(int j = 0; j < nInputs; j++)
         {
           for(int i = 0; i < in_vars[j].num_elem; i++)
             {
-              real_t tab_val = RTEnvd.iTable[(k*(*RTEnvd.iSize))+i+offset+i_tab_offset];
-              real_t in_val = ((real_t*)in_vars[j].ptr)[i];
               real_t in_val_conv = 0;
               convertToSingleWithOffset(&in_val_conv, in_vars[j].ptr, 0, i, (ApproxType) in_vars[j].data_type);
-              real_t dist = fabs(RTEnvd.iTable[(k*(*RTEnvd.iSize))+offset+i+i_tab_offset] - in_val_conv);
+              real_t dist = fabs(RTEnvd.iTable[(k*(*RTEnvd.iSize))+offset+i+i_tab_offset+(omp_get_thread_num()*in_vars[j].num_elem)] - in_val_conv);
               dist_total += dist;
             }
-          offset += in_vars[j].num_elem;
+
+          offset += n_active_threads * in_vars[j].num_elem;
         }
 
       dist_total /= n_input_values;
@@ -349,29 +358,30 @@ void __approx_device_memo(void (*accurateFN)(void *), void *arg, int memo_type, 
   else
     {
       offset = 0;
-      entry_index = RTEnvd.inputIdx[i_tab_offset];
-
       // NOTE: for correctness of inout, we have to copy the input before calling accurateFN
       for(int j = 0; j < nInputs; j++)
         {
           for(int i = 0; i < in_vars[j].num_elem; i++)
             {
-              convertToSingleWithOffset(RTEnvd.iTable, in_vars[j].ptr, i+offset+i_tab_offset+(*RTEnvd.iSize*entry_index), i,
+              entry_index = RTEnvd.inputIdx[offset+i+i_tab_offset+(omp_get_thread_num()*in_vars[j].num_elem)];
+              convertToSingleWithOffset(RTEnvd.iTable, in_vars[j].ptr, i+offset+i_tab_offset+(*RTEnvd.iSize*entry_index)+(omp_get_thread_num()*in_vars[j].num_elem), i,
                                         (ApproxType) in_vars[j].data_type);
-            }
+              RTEnvd.inputIdx[i_tab_offset+offset+i+(omp_get_thread_num()*in_vars[j].num_elem)] += 1;
 
-          offset += in_vars[j].num_elem;
+            }
+          offset += n_active_threads*in_vars[j].num_elem;
         }
 
       accurateFN(arg);
       // TODO: Update to be min(num_rows, what is currently below)
       offset = 0;
+      // I certainly wrote here above, we just use entry index as the row number
+      entry_index = RTEnvd.inputIdx[i_tab_offset + (omp_get_thread_num() * in_vars[0].num_elem)]-1;
       // TODO: this should be size_t
       for(int j = 0; j < nOutputs; j++)
         {
           for(size_t i = 0; i < out_vars[j].num_elem; i++)
             {
-              RTEnvd.inputIdx[i_tab_offset+offset+i] += 1;
               convertToSingleWithOffset(RTEnvd.oTable, out_vars[j].ptr, offset+i+o_tab_offset+(*RTEnvd.oSize*entry_index), i,
                                         (ApproxType) out_vars[j].data_type);
             }
