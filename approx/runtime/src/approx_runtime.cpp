@@ -226,6 +226,9 @@ int getPredictionSize() { return RTEnv.predictionSize;}
 int getHistorySize() { return RTEnv.historySize; }
 int getTableSize() { return RTEnv.tableSize; }
 float getThreshold(){ return RTEnv.threshold;}
+void setHostThreshold(float newThreshold){
+  RTEnv.threshold = newThreshold;
+}
 
 
 bool __approx_skip_iteration(unsigned int i, float pr) {
