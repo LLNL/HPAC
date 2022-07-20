@@ -178,10 +178,8 @@ class MemoizeInput {
             // TODO: How can we increase the granularity? Collapse? Won't work here because of the inner loop
             // we can maybe submit the kernels in parallel
             for (int i = 0; i < input_index; i++){
-              dist[0] = 0;
               #pragma omp target teams distribute parallel for reduction(+:dist[0]) default(shared)
               for (int j = 0; j < iSize; j++){
-                if(j==0) dist[0] = 0;
                 if (inTabWr(i,j) != 0.0f)
                   dist[0] += fabs((iTemp[j] - inTabWr(i,j))/inTabWr(i,j));
                 else
@@ -193,6 +191,8 @@ class MemoizeInput {
                 mind[0] = dist[0];
                 minidx[0] = i;
               }
+              dist[0] = 0.0;
+              #pragma omp target update to(dist[0:1])
           if(minDist < threshold)
             break;
             }
