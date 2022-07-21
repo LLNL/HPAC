@@ -314,7 +314,6 @@ void __approx_device_memo(void (*accurateFN)(void *), void *arg, int memo_type, 
   if(my_num_vals < omp_get_num_threads())
     n_active_threads = my_num_vals;
 
-
   // TODO: Because of temp. locality, may be better to loop down
   for(int k = 0; k < RTEnvd.inputIdx[i_tab_offset+(omp_get_thread_num()*in_vars[0].num_elem)]; k++)
     {
@@ -369,7 +368,8 @@ void __approx_device_memo(void (*accurateFN)(void *), void *arg, int memo_type, 
               entry_index = RTEnvd.inputIdx[offset+i+i_tab_offset+(omp_get_thread_num()*in_vars[j].num_elem)];
               convertToSingleWithOffset(RTEnvd.iTable, in_vars[j].ptr, i+offset+i_tab_offset+(*RTEnvd.iSize*entry_index)+(omp_get_thread_num()*in_vars[j].num_elem), i,
                                         (ApproxType) in_vars[j].data_type);
-              RTEnvd.inputIdx[i_tab_offset+offset+i+(omp_get_thread_num()*in_vars[j].num_elem)] += 1;
+              size_t offset = i_tab_offset+offset+i+(omp_get_thread_num()*in_vars[j].num_elem);
+              RTEnvd.inputIdx[offset] = min(*RTEnvd.tabNumEntries, RTEnvd.inputIdx[offset]+1);
 
             }
           offset += n_active_threads*in_vars[j].num_elem;
