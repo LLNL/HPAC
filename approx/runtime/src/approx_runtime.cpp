@@ -324,7 +324,7 @@ void __approx_device_memo(void (*accurateFN)(void *), void *arg, int memo_type, 
           for(int i = 0; i < in_vars[j].num_elem; i++)
             {
               real_t in_val_conv = 0;
-              convertToSingleWithOffset(&in_val_conv, in_vars[j].ptr, 0, i, (ApproxType) in_vars[j].data_type);
+              convertToSingleWithOffsetInput(&in_val_conv, in_vars[j].ptr, 0, i, (ApproxType) in_vars[j].data_type);
               real_t dist = fabs(RTEnvd.iTable[(k*(*RTEnvd.iSize))+offset+i+i_tab_offset+(omp_get_thread_num()*in_vars[j].num_elem)] - in_val_conv);
               dist_total += dist;
             }
@@ -366,7 +366,7 @@ void __approx_device_memo(void (*accurateFN)(void *), void *arg, int memo_type, 
           for(int i = 0; i < in_vars[j].num_elem; i++)
             {
               entry_index = RTEnvd.inputIdx[offset+i+i_tab_offset+(omp_get_thread_num()*in_vars[j].num_elem)];
-              convertToSingleWithOffset(RTEnvd.iTable, in_vars[j].ptr, i+offset+i_tab_offset+(*RTEnvd.iSize*entry_index)+(omp_get_thread_num()*in_vars[j].num_elem), i,
+              convertToSingleWithOffsetInput(RTEnvd.iTable, in_vars[j].ptr, i+offset+i_tab_offset+(*RTEnvd.iSize*entry_index)+(omp_get_thread_num()*in_vars[j].num_elem), i,
                                         (ApproxType) in_vars[j].data_type);
               size_t offset = i_tab_offset+offset+i+(omp_get_thread_num()*in_vars[j].num_elem);
               RTEnvd.inputIdx[offset] = min(*RTEnvd.tabNumEntries, RTEnvd.inputIdx[offset]+1);
@@ -385,7 +385,7 @@ void __approx_device_memo(void (*accurateFN)(void *), void *arg, int memo_type, 
         {
           for(size_t i = 0; i < out_vars[j].num_elem; i++)
             {
-              convertToSingleWithOffset(RTEnvd.oTable, out_vars[j].ptr, offset+i+o_tab_offset+(*RTEnvd.oSize*entry_index), i,
+              convertToSingleWithOffsetOutput(RTEnvd.oTable, out_vars[j].ptr, offset+i+o_tab_offset+(*RTEnvd.oSize*entry_index), i,
                                         (ApproxType) out_vars[j].data_type);
             }
           offset += out_vars[j].num_elem;

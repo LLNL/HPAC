@@ -165,7 +165,7 @@ void convertTo(T *dest, void *src, size_t numElements,
 
 #pragma omp declare target
 template<typename T>
-void convertToSingleWithOffset(T *dest, void *src, size_t dest_offset,
+void convertToSingleWithOffsetInput(T *dest, void *src, size_t dest_offset,
                                size_t src_offset, ApproxType Type){
     switch (Type) {
     case FLOAT:
@@ -180,6 +180,24 @@ void convertToSingleWithOffset(T *dest, void *src, size_t dest_offset,
       break;
     }
 }
+
+template<typename T>
+void convertToSingleWithOffsetOutput(T *dest, void *src, size_t dest_offset,
+                               size_t src_offset, ApproxType Type){
+    switch (Type) {
+    case FLOAT:
+      *dest = (T)(*(float*)src);
+      return;
+// #define APPROX_TYPE(Enum, CType, nameOfType)                                   \
+//   case Enum:                                                                   \
+//     dest[dest_offset] = (T)((CType *)src)[src_offset];                         \
+//     return;
+// #include "clang/Basic/approxTypes.def"
+    case INVALID:
+      break;
+    }
+}
+
 
 template<typename T>
 void convertFromSingleWithOffset(void *dest, T *src, size_t dest_offset,
