@@ -65,12 +65,14 @@ typedef struct approx_var_info_t {
   uint8_t dir;
 } approx_var_info_t;
 
+#pragma omp declare target
 enum ApproxType : int8_t {
 #define APPROX_TYPE(Id, type, nameOfType) Id,
 #include "clang/Basic/approxTypes.def"
   INVALID
 #undef APPROX_TYPE
 };
+#pragma omp end declare target
 
 void memoize_out(void (*accurate)(void *), void *arg,
                  approx_var_info_t *outputs, int num_outputs);
