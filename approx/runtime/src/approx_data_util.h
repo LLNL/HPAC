@@ -167,38 +167,26 @@ void convertTo(T *dest, void *src, size_t numElements,
 template<typename T>
 void convertToSingleWithOffset(T *dest, void *src, size_t dest_offset,
                                size_t src_offset, ApproxType Type){
-  switch (Type) {
-  case INT:
-    dest[dest_offset] = (T)((int*)src)[src_offset];
-    return;
-  case FLOAT:
-    dest[dest_offset] = (T)((float*)src)[src_offset];
-    return;
-// #define APPROX_TYPE(Enum, CType, nameOfType)                                   \
+    switch (Type) {
+#define APPROX_TYPE(Enum, CType, nameOfType)                                   \
   case Enum:                                                                   \
     dest[dest_offset] = (T)((CType *)src)[src_offset];                         \
     return;
-// #include "clang/Basic/approxTypes.def"
-  case INVALID:
-    break;
-  }
+#include "clang/Basic/approxTypes.def"
+    case INVALID:
+      break;
+    }
 }
 
 template<typename T>
 void convertFromSingleWithOffset(void *dest, T *src, size_t dest_offset,
                                size_t src_offset, ApproxType Type){
     switch (Type) {
-    case INT:
-      ((int*)dest)[dest_offset] = (T)src[src_offset];
-      return;
-  case FLOAT:
-    ((float*)dest)[dest_offset] = (T)src[src_offset];
-    return;
-// #define APPROX_TYPE(Enum, CType, nameOfType)                                   \
+#define APPROX_TYPE(Enum, CType, nameOfType)                                   \
   case Enum:                                                                   \
     ((CType*)dest)[dest_offset] = (T)src[src_offset];        \
     return;
-// #include "clang/Basic/approxTypes.def"
+#include "clang/Basic/approxTypes.def"
     case INVALID:
       break;
     }

@@ -314,13 +314,6 @@ void __approx_device_memo(void (*accurateFN)(void *), void *arg, int memo_type, 
   if(my_num_vals < omp_get_num_threads())
     n_active_threads = my_num_vals;
 
-  // if(tid_global == 0)
-  //   {
-  //     unsigned long is0 = in_vars[0].num_elem;
-  //     unsigned long is1 = in_vars[1].num_elem;
-  //       printf("Num inputs: %d, isize 0: %lu, isize1: %lu\n", nInputs, is0, is1);
-  //   }
-
   // TODO: Because of temp. locality, may be better to loop down
   for(int k = 0; k < RTEnvd.inputIdx[i_tab_offset+(omp_get_thread_num()*in_vars[0].num_elem)]; k++)
     {
@@ -346,7 +339,6 @@ void __approx_device_memo(void (*accurateFN)(void *), void *arg, int memo_type, 
           entry_index = k;
           break;
         }
-
     }
 
   if(entry_index != -1 && dist_total < *RTEnvd.threshold)
@@ -374,14 +366,12 @@ void __approx_device_memo(void (*accurateFN)(void *), void *arg, int memo_type, 
           for(int i = 0; i < in_vars[j].num_elem; i++)
             {
               entry_index = RTEnvd.inputIdx[offset+i+i_tab_offset+(omp_get_thread_num()*in_vars[j].num_elem)];
-              convertToSingleWithOffset(RTEnvd.iTable, in_vars[j].ptr, i+offset+i_tab_offset+(*RTEnvd.iSize*entry_index*0)+(omp_get_thread_num()*in_vars[j].num_elem), i,
+              convertToSingleWithOffset(RTEnvd.iTable, in_vars[j].ptr, i+offset+i_tab_offset+(*RTEnvd.iSize*entry_index)+(omp_get_thread_num()*in_vars[j].num_elem), i,
                                         (ApproxType) in_vars[j].data_type);
-              // RTEnvd.inputIdx[i_tab_offset+offset+i+(omp_get_thread_num()*in_vars[j].num_elem)] = min(*RTEnvd.tabNumEntries, RTEnvd.inputIdx[i_tab_offset+offset+i+(omp_get_thread_num()*in_vars[j].num_elem)]+1);
-              // if(tid_global == 0)
-                // printf("Input idx val is: %d\n", RTEnvd.inputIdx[i_tab_offset+offset+i+(omp_get_thread_num()*in_vars[j].num_elem)]);
-              RTEnvd.inputIdx[i_tab_offset+offset+i+(omp_get_thread_num()*in_vars[j].num_elem)] = RTEnvd.inputIdx[i_tab_offset+offset+i+(omp_get_thread_num()*in_vars[j].num_elem)]+1;// min(*RTEnvd.tabNumEntries, RTEnvd.inputIdx[i_tab_offset+offset+i+(omp_get_thread_num()*in_vars[j].num_elem)]+1);
-              // if(tid_global == 0)
-                // printf("Input idx val is: %d\n", RTEnvd.inputIdx[i_tab_offset+offset+i+(omp_get_thread_num()*in_vars[j].num_elem)]);
+              size_t idx_ofset = i_tab_offset+offset+i+(omp_get_thread_num()*in_vars[j].num_elem);
+              RTEnvd.inputIdx[idx_ofset] = min(*RTEnvd.tabNumEntries, RTEnvd.inputIdx[idx_ofset]+1);
+
+
             }
           offset += n_active_threads*in_vars[j].num_elem;
         }
@@ -391,7 +381,6 @@ void __approx_device_memo(void (*accurateFN)(void *), void *arg, int memo_type, 
       offset = 0;
       // I certainly wrote here above, we just use entry index as the row number
       entry_index = RTEnvd.inputIdx[i_tab_offset + (omp_get_thread_num() * in_vars[0].num_elem)]-1;
-
       // TODO: this should be size_t
       for(int j = 0; j < nOutputs; j++)
         {
