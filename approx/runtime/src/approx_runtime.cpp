@@ -150,6 +150,7 @@ void resetDeviceTable(float newThresh, size_t newiSize, size_t newoSize, int new
 
 void writeDeviceThreadStatistics(std::ostream& file){
   #ifdef APPROX_DEV_STATS
+  file << "THREAD,ACCURATE,APPROX,RATIO\n";
   int nthreads = *RTEnvd.nthreads;
 #pragma omp target update from(RTEnvd.accurate_count[0:nthreads], RTEnvd.approx_count[0:nthreads])
   for(int tnum = 0; tnum < nthreads; tnum++)
