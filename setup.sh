@@ -63,27 +63,12 @@ if [ ! -f $approx_runtime_lib ]; then
       -DLLVM_EXTERNAL_CLANG_SOURCE_DIR=${current_dir}/clang/ \
       -DPACKAGE_VERSION=15.0.0 \
 	  -DLIBAPPROX_ENABLE_SHARED=0 \
+	  -DDEV_STATS=0 \
      ../approx
     ninja -j $threads
     ninja -j $threads install
     popd
 fi
-exit
-if [ ! -f $approx_runtime_lib ]; then
-  mkdir build_hpac
-  pushd build_hpac
-  CC=clang CPP=clang++ cmake -G Ninja \
-      -DCMAKE_INSTALL_PREFIX=$prefix \
-      -DLLVM_EXTERNAL_CLANG_SOURCE_DIR=${current_dir}/clang/ \
-      -DPACKAGE_VERSION=15.0.0git \
-	  -DLIBAPPROX_ENABLE_SHARED=0 \
-     ../approx
-    ninja -j $threads
-    ninja -j $threads install
-    popd
-fi
-
-exit
 pushd ./approx/approx_utilities/
 
 if [ ! -f 'original_src.tar.gz' ]; then
