@@ -19,6 +19,11 @@ if (OPENMP_FOUND)
     message("LINKER FLAGS ARE ${OpenMP_EXE_LINKER_FLAGS}")
 endif()
 
+option(DEV_STATS "Turn on the collection of device approximation statistics" 0)
+if(DEV_STATS)
+  add_compile_definitions(APPROX_DEV_STATS)
+endif()
+
 set(CMAKE_CXX_STANDARD 14 CACHE STRING "C++ standard to conform to")
 set(CMAKE_CXX_STANDARD_REQUIRED YES)
 set(CMAKE_CXX_EXTENSIONS NO)

@@ -54,9 +54,15 @@ public:
   float *threshold = nullptr;
   real_t *iTable = nullptr;
   real_t *oTable = nullptr;
+#ifdef APPROX_DEV_STATS
+  int *accurate_count = nullptr;
+  int *approx_count = nullptr;
+  int *nthreads = nullptr;
+#endif //APPROX_DEV_STATS
   ApproxRuntimeDevDataEnv() = default;
 
-  void resetTable(float _threshold, size_t _iput_size, size_t _oput_size, int _numTableEntries){
+#pragma omp end declare target
+  void resetTable(float _threshold, size_t _iput_size, size_t _oput_size, int _numTableEntries, int _nthreads){
     destruct();
     threshold = new float[1];
     iSize = new size_t[1];
@@ -69,6 +75,16 @@ public:
     inputIdx = new char[_iput_size];
     iTable = new real_t[_iput_size*_numTableEntries];
     oTable = new real_t[_oput_size*_numTableEntries];
+    #ifdef APPROX_DEV_STATS
+    nthreads = new int[1];
+    *nthreads = _nthreads;
+    accurate_count = new int[*nthreads];
+    approx_count = new int[*nthreads];
+
+    std::fill(accurate_count, accurate_count+*nthreads, 0);
+    std::fill(approx_count, approx_count+*nthreads, 0);
+    #endif // APPROX_DEV_STATS
+
 
     std::fill(inputIdx, inputIdx+_iput_size, 0);
   }
@@ -82,29 +98,73 @@ public:
     delete[] inputIdx;
     delete[] iTable;
     delete[] oTable;
+    #ifdef APPROX_DEV_STATS
+    delete[] nthreads;
+    delete[] accurate_count;
+    delete[] approx_count;
+    #endif // APPROX_DEV_STATS
   }
+#pragma omp declare target
 };
 
 ApproxRuntimeDevDataEnv RTEnvd = ApproxRuntimeDevDataEnv();
 #pragma omp end declare target
 
-void resetDeviceTable(float newThresh, size_t newiSize, size_t newoSize, int newNumTabEntries){
+void resetDeviceTable(float newThresh, size_t newiSize, size_t newoSize, int newNumTabEntries, int nThreads){
   float threshold = newThresh == -1.0 ? *RTEnvd.threshold : newThresh;
   size_t iSize = newiSize == -1 ? *RTEnvd.iSize : newiSize;
   size_t oSize = newoSize == -1 ? *RTEnvd.oSize : newoSize;
   int numTabEntries = newNumTabEntries == -1 ? *RTEnvd.tabNumEntries : newNumTabEntries;
+  if(nThreads == -1)
+    {
+  #ifdef APPROX_DEV_STATS
+    nThreads = *RTEnvd.nthreads;
+  #endif
+    }
+
+  #ifndef APPROX_DEV_STATS
+  if(nThreads != -1)
+    printf("WARNING: A number of threads has been give, but HPAC is not built to collect per-thread memoization statistics. "
+           "The argument will be ignored\n");
+  #endif
 
   if(omp_target_is_present(RTEnvd.iSize, 0))
     {
       size_t oldInSize = *RTEnvd.iSize;
       size_t oldOutSize = *RTEnvd.oSize;
       int oldNumEntries = *RTEnvd.tabNumEntries;
-#pragma omp target exit data map(delete:RTEnvd, RTEnvd.threshold[0:1], RTEnvd.tabNumEntries[0:1], RTEnvd.iSize[0:1], RTEnvd.oSize[0:1], RTEnvd.inputIdx[0:oldInSize], RTEnvd.iTable[0:oldInSize*oldNumEntries], RTEnvd.oTable[0:oldOutSize*oldNumEntries])
-    }
-  RTEnvd.resetTable(threshold, iSize, oSize, numTabEntries);
-#pragma omp target enter data map(to:RTEnvd, RTEnvd.threshold[0:1], RTEnvd.tabNumEntries[0:1], RTEnvd.iSize[0:1], RTEnvd.oSize[0:1], RTEnvd.inputIdx[0:iSize], RTEnvd.iTable[0:iSize*numTabEntries], RTEnvd.oTable[0:oSize*numTabEntries])
 
+      #ifdef APPROX_DEV_STATS
+      #pragma omp target exit data map(delete:RTEnvd, RTEnvd.threshold[0:1], RTEnvd.tabNumEntries[0:1], RTEnvd.iSize[0:1], RTEnvd.oSize[0:1], RTEnvd.inputIdx[0:oldInSize], RTEnvd.iTable[0:oldInSize*oldNumEntries], RTEnvd.oTable[0:oldOutSize*oldNumEntries], RTEnvd.accurate_count[0:nThreads], RTEnvd.approx_count[0:nThreads])
+      #else
+      #pragma omp target exit data map(delete:RTEnvd, RTEnvd.threshold[0:1], RTEnvd.tabNumEntries[0:1], RTEnvd.iSize[0:1], RTEnvd.oSize[0:1], RTEnvd.inputIdx[0:oldInSize], RTEnvd.iTable[0:oldInSize*oldNumEntries], RTEnvd.oTable[0:oldOutSize*oldNumEntries])
+      #endif //APPROX_DEV_STATS
+    }
+  RTEnvd.resetTable(threshold, iSize, oSize, numTabEntries, nThreads);
+  #ifdef APPROX_DEV_STATS
+  #pragma omp target enter data map(to:RTEnvd, RTEnvd.threshold[0:1], RTEnvd.tabNumEntries[0:1], RTEnvd.iSize[0:1], RTEnvd.oSize[0:1], RTEnvd.inputIdx[0:iSize], RTEnvd.iTable[0:iSize*numTabEntries], RTEnvd.oTable[0:oSize*numTabEntries], RTEnvd.accurate_count[0:nThreads], RTEnvd.approx_count[0:nThreads])
+  #else
+  #pragma omp target enter data map(to:RTEnvd, RTEnvd.threshold[0:1], RTEnvd.tabNumEntries[0:1], RTEnvd.iSize[0:1], RTEnvd.oSize[0:1], RTEnvd.inputIdx[0:iSize], RTEnvd.iTable[0:iSize*numTabEntries], RTEnvd.oTable[0:oSize*numTabEntries])
+  #endif // APPROX_DEV_STATS
 }
+
+void writeDeviceThreadStatistics(std::ostream& file){
+  #ifdef APPROX_DEV_STATS
+  int nthreads = *RTEnvd.nthreads;
+#pragma omp target update from(RTEnvd.accurate_count[0:nthreads], RTEnvd.approx_count[0:nthreads])
+  for(int tnum = 0; tnum < nthreads; tnum++)
+    {
+      int accur = RTEnvd.accurate_count[tnum];
+      int appro = RTEnvd.approx_count[tnum];
+      file << tnum << ","
+           << accur << ","
+           << appro << ","
+           << (float) appro / (accur + appro)
+           << "\n";
+    }
+  #endif
+}
+
 
 float getDeviceThreshold(){
   if(RTEnvd.threshold)
@@ -205,8 +265,21 @@ public:
      randomNumbers[i] = distribution(generator);
     }
 
-    // TODO: Initial num table entries from the environment
-    resetDeviceTable(threshold, offloadTableISize, offloadTableOSize, tableSize);
+
+    #ifdef APPROX_DEV_STATS
+    char *n_threads = std::getenv("NUM_THREADS");
+    if(!n_threads)
+      {
+        printf("HPAC was built to gather per-thread approx statistics, but 'NUM_THREADS' not provided in the environment. Exiting...\n");
+        std::abort();
+      }
+    printf("WARNING: HPAC will collect per-thread approximation statistics, affecting runtime. For performance benchmarking, disable this feature\n");
+    int nThreads = std::atoi(n_threads);
+    resetDeviceTable(threshold, offloadTableISize, offloadTableOSize, tableSize, nThreads);
+    #else
+    resetDeviceTable(threshold, offloadTableISize, offloadTableOSize, tableSize, 0);
+    #endif  //APPROX_DEV_STATS
+
   }
 
   ~ApproxRuntimeConfiguration(){
@@ -356,6 +429,10 @@ void __approx_device_memo(void (*accurateFN)(void *), void *arg, int memo_type, 
             }
           offset += out_vars[j].num_elem;
         }
+
+      #ifdef APPROX_DEV_STATS
+      RTEnvd.approx_count[tid_global] += 1;
+      #endif // APPROX_DEV_STATS
     }
   else
     {
@@ -377,7 +454,11 @@ void __approx_device_memo(void (*accurateFN)(void *), void *arg, int memo_type, 
         }
 
       accurateFN(arg);
-      // TODO: Update to be min(num_rows, what is currently below)
+
+      #ifdef APPROX_DEV_STATS
+      RTEnvd.accurate_count[tid_global] += 1;
+      #endif // APPROX_DEV_STATS
+
       offset = 0;
       // I certainly wrote here above, we just use entry index as the row number
       // We want to subtract 1 to get entry index before it was incremented above,
