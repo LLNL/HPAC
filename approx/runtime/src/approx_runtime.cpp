@@ -389,7 +389,7 @@ void __approx_device_memo(void (*accurateFN)(void *), void *arg, int memo_type, 
     n_active_threads = my_num_vals;
 
   // TODO: Because of temp. locality, may be better to loop down
-  for(int k = 0; k < RTEnvd.inputIdx[i_tab_offset+(omp_get_thread_num()*in_vars[0].num_elem)]; k++)
+  for(int k = 0; k < RTEnvd.inputIdx[i_tab_offset+omp_get_thread_num()]; k++)
     {
       offset = 0;
       dist_total = 0;
@@ -443,10 +443,10 @@ void __approx_device_memo(void (*accurateFN)(void *), void *arg, int memo_type, 
         {
           for(int i = 0; i < in_vars[j].num_elem; i++)
             {
-              entry_index = RTEnvd.inputIdx[offset+i+i_tab_offset+(omp_get_thread_num()*in_vars[j].num_elem)];
+              entry_index = RTEnvd.inputIdx[offset+(i*omp_get_num_threads()+omp_get_thread_num())+i_tab_offset];
               convertToSingleWithOffset(RTEnvd.iTable, in_vars[j].ptr, (i*omp_get_num_threads()+omp_get_thread_num())+offset+i_tab_offset+(*RTEnvd.iSize*entry_index), i,
                                         (ApproxType) in_vars[j].data_type);
-              size_t idx_ofset = i_tab_offset+offset+i+(omp_get_thread_num()*in_vars[j].num_elem);
+              size_t idx_ofset = i_tab_offset+offset+(i*omp_get_num_threads()+omp_get_thread_num());
               RTEnvd.inputIdx[idx_ofset] = min(*RTEnvd.tabNumEntries-1, RTEnvd.inputIdx[idx_ofset]+1);
 
 
@@ -464,7 +464,7 @@ void __approx_device_memo(void (*accurateFN)(void *), void *arg, int memo_type, 
       // I certainly wrote here above, we just use entry index as the row number
       // We want to subtract 1 to get entry index before it was incremented above,
       // ensuring it is always above 0
-      entry_index = max(RTEnvd.inputIdx[i_tab_offset + (omp_get_thread_num() * in_vars[0].num_elem)]-1, 0);
+      entry_index = max(RTEnvd.inputIdx[i_tab_offset + omp_get_thread_num()]-1, 0);
       // TODO: this should be size_t
       for(int j = 0; j < nOutputs; j++)
         {
