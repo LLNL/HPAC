@@ -28,6 +28,15 @@
 #include "approx_data_util.h"
 #include "approx_internal.h"
 
+#pragma omp begin declare target
+void syncThreadsAligned(){};
+#pragma omp end declare target
+#pragma omp begin declare variant match(                                       \
+    device = {arch(nvptx, nvptx64)}, implementation = {extension(match_any)})
+void syncThreadsAligned() { __syncthreads(); }
+#pragma omp end declare variant
+
+
 
 using namespace std;
 
@@ -350,8 +359,7 @@ const int approx_rt_get_step(){
   return RTEnv.perfoStep;
 }
 
-#pragma omp declare target
-
+#pragma omp begin declare target device_type(nohost)
 void __approx_device_memo(void (*accurateFN)(void *), void *arg, int memo_type, void *in_data, int nInputs, void *out_data, int nOutputs)
 {
   approx_var_info_t *in_vars = (approx_var_info_t*) in_data;
@@ -388,6 +396,8 @@ void __approx_device_memo(void (*accurateFN)(void *), void *arg, int memo_type, 
   if(my_num_vals < omp_get_num_threads())
     n_active_threads = my_num_vals;
 
+
+  syncThreadsAligned();
   // TODO: Because of temp. locality, may be better to loop down
   for(int k = 0; k < RTEnvd.inputIdx[i_tab_offset+omp_get_thread_num()]; k++)
     {
