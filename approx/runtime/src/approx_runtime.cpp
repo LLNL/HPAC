@@ -399,7 +399,7 @@ void __approx_device_memo(void (*accurateFN)(void *), void *arg, int memo_type, 
             {
               real_t in_val_conv = 0;
               convertToSingleWithOffset(&in_val_conv, in_vars[j].ptr, 0, i, (ApproxType) in_vars[j].data_type);
-              real_t dist = fabs(RTEnvd.iTable[(k*(*RTEnvd.iSize))+offset+i+i_tab_offset+(omp_get_thread_num()*in_vars[j].num_elem)] - in_val_conv);
+              real_t dist = fabs(RTEnvd.iTable[i_tab_offset+(k*(*RTEnvd.iSize))+offset+(i*omp_get_num_threads()+omp_get_thread_num())] - in_val_conv);
               dist_total += dist;
             }
 
@@ -444,7 +444,7 @@ void __approx_device_memo(void (*accurateFN)(void *), void *arg, int memo_type, 
           for(int i = 0; i < in_vars[j].num_elem; i++)
             {
               entry_index = RTEnvd.inputIdx[offset+i+i_tab_offset+(omp_get_thread_num()*in_vars[j].num_elem)];
-              convertToSingleWithOffset(RTEnvd.iTable, in_vars[j].ptr, i+offset+i_tab_offset+(*RTEnvd.iSize*entry_index)+(omp_get_thread_num()*in_vars[j].num_elem), i,
+              convertToSingleWithOffset(RTEnvd.iTable, in_vars[j].ptr, (i*omp_get_num_threads()+omp_get_thread_num())+offset+i_tab_offset+(*RTEnvd.iSize*entry_index), i,
                                         (ApproxType) in_vars[j].data_type);
               size_t idx_ofset = i_tab_offset+offset+i+(omp_get_thread_num()*in_vars[j].num_elem);
               RTEnvd.inputIdx[idx_ofset] = min(*RTEnvd.tabNumEntries-1, RTEnvd.inputIdx[idx_ofset]+1);
