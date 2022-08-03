@@ -372,7 +372,7 @@ void __approx_device_memo(void (*accurateFN)(void *), void *arg, int memo_type, 
   size_t i_tab_offset = 0;
   size_t o_tab_offset = 0;
 
-  real_t inp_sm[SM_SZ_IN_BYTES];
+  real_t inp_sm[SM_SZ_IN_BYTES/4];
   #pragma omp allocate(inp_sm) allocator(omp_pteam_mem_alloc)
   int n_sm_vals = SM_SZ_IN_BYTES/4;
 
@@ -416,6 +416,7 @@ void __approx_device_memo(void (*accurateFN)(void *), void *arg, int memo_type, 
   // we can load our input for this iteration into shared memory
   if(omp_get_thread_num() < n_inp_val_in_sm)
     {
+      offset = 0;
       for(int j = 0; j < nInputs; j++)
         {
           for(int i = 0; i < in_vars[j].num_elem; i++)
@@ -442,9 +443,9 @@ void __approx_device_memo(void (*accurateFN)(void *), void *arg, int memo_type, 
             {
               real_t in_val_conv = 0;
               if(omp_get_thread_num() < n_inp_val_in_sm)
-                convertToSingleWithOffset(&in_val_conv, inp_sm, 0, (i*n_inp_val_in_sm+omp_get_thread_num())+offset, (ApproxType) in_vars[j].data_type);
+                in_val_conv = inp_sm[(i*n_inp_val_in_sm+omp_get_thread_num())+offset];
               else
-                  convertToSingleWithOffset(&in_val_conv, in_vars[j].ptr, 0, i, (ApproxType) in_vars[j].data_type);
+                convertToSingleWithOffset(&in_val_conv, in_vars[j].ptr, 0, i, (ApproxType) in_vars[j].data_type);
               real_t dist = fabs(RTEnvd.iTable[i_tab_offset+(k*(*RTEnvd.iSize))+offset+(i*omp_get_num_threads()+omp_get_thread_num())] - in_val_conv);
               dist_total += dist;
             }
@@ -492,9 +493,7 @@ void __approx_device_memo(void (*accurateFN)(void *), void *arg, int memo_type, 
               entry_index = RTEnvd.inputIdx[offset+(i*omp_get_num_threads()+omp_get_thread_num())+i_tab_offset];
 
               if(omp_get_thread_num() < n_inp_val_in_sm)
-                convertToSingleWithOffset(RTEnvd.iTable, inp_sm, (i*omp_get_num_threads()+omp_get_thread_num())+offset+i_tab_offset+(*RTEnvd.iSize*entry_index),
-                                          (i*n_inp_val_in_sm+omp_get_thread_num())+offset, (ApproxType) in_vars[j].data_type
-                                          );
+                RTEnvd.iTable[(i*omp_get_num_threads()+omp_get_thread_num())+offset+i_tab_offset+(*RTEnvd.iSize*entry_index)] = inp_sm[(i*n_inp_val_in_sm+omp_get_thread_num())+offset];
               else
                 convertToSingleWithOffset(RTEnvd.iTable, in_vars[j].ptr, (i*omp_get_num_threads()+omp_get_thread_num())+offset+i_tab_offset+(*RTEnvd.iSize*entry_index), i,
                                           (ApproxType) in_vars[j].data_type);
