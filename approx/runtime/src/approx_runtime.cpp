@@ -404,7 +404,7 @@ void __approx_device_memo(void (*accurateFN)(void *), void *arg, int memo_type, 
     n_active_threads = my_num_vals;
 
 
-  int n_inp_val_in_sm = n_input_values / n_sm_vals;
+  int n_inp_val_in_sm = n_sm_vals / n_input_values;
   if(n_sm_vals == 0) n_inp_val_in_sm = 0;
 
   // because per call to '__approx_device_memo', each thread
