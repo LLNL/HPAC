@@ -371,6 +371,11 @@ void __approx_device_memo(void (*accurateFN)(void *), void *arg, int memo_type, 
   int entry_index = -1;
   size_t i_tab_offset = 0;
   size_t o_tab_offset = 0;
+
+  real_t inp_sm[SM_SZ_IN_BYTES];
+  #pragma omp allocate(inp_sm) allocator(omp_pteam_mem_alloc)
+  int n_sm_vals = SM_SZ_IN_BYTES/4;
+
   // FIXME: assume inputs are the same size
   for(int i = 0; i < nInputs; i++)
     {
@@ -383,6 +388,7 @@ void __approx_device_memo(void (*accurateFN)(void *), void *arg, int memo_type, 
     }
 
   n_input_values = i_tab_offset;
+
   // assume all of a thread's predecessors have the same number of inputs and outputs
   // this assumption is valid even if the last thread does fewer iterations of the loop
   i_tab_offset *= omp_get_team_num() * omp_get_num_threads();
@@ -391,13 +397,40 @@ void __approx_device_memo(void (*accurateFN)(void *), void *arg, int memo_type, 
   int n_active_threads = omp_get_num_threads();
   int tot_input = (*RTEnvd.iSize/nInputs);
   int input_start = (omp_get_num_threads()*(omp_get_team_num()));
+  // 'my' meaning my block
   int my_num_vals = tot_input - input_start;
 
   if(my_num_vals < omp_get_num_threads())
     n_active_threads = my_num_vals;
 
 
-  syncThreadsAligned();
+  int n_inp_val_in_sm = n_input_values / n_sm_vals;
+  if(n_sm_vals == 0) n_inp_val_in_sm = 0;
+
+  // because per call to '__approx_device_memo', each thread
+  // uses exactly one value of the input, we use at most
+  // omp_get_num_threads() values
+  if(n_inp_val_in_sm > n_active_threads)
+    n_inp_val_in_sm = n_active_threads;
+
+  // we can load our input for this iteration into shared memory
+  if(omp_get_thread_num() < n_inp_val_in_sm)
+    {
+      for(int j = 0; j < nInputs; j++)
+        {
+          for(int i = 0; i < in_vars[j].num_elem; i++)
+            {
+              convertToSingleWithOffset(inp_sm, in_vars[j].ptr, (i*n_inp_val_in_sm+omp_get_thread_num())+offset, i,
+                                        (ApproxType) in_vars[j].data_type);
+            }
+
+          offset += n_active_threads * in_vars[j].num_elem;
+        }
+    }
+
+  // no need to synchronize after writing to shared memory: every thread writes
+  // and reads its own values
+
   // TODO: Because of temp. locality, may be better to loop down
   for(int k = 0; k < RTEnvd.inputIdx[i_tab_offset+omp_get_thread_num()]; k++)
     {
@@ -408,7 +441,10 @@ void __approx_device_memo(void (*accurateFN)(void *), void *arg, int memo_type, 
           for(int i = 0; i < in_vars[j].num_elem; i++)
             {
               real_t in_val_conv = 0;
-              convertToSingleWithOffset(&in_val_conv, in_vars[j].ptr, 0, i, (ApproxType) in_vars[j].data_type);
+              if(omp_get_thread_num() < n_inp_val_in_sm)
+                convertToSingleWithOffset(&in_val_conv, inp_sm, 0, (i*n_inp_val_in_sm+omp_get_thread_num())+offset, (ApproxType) in_vars[j].data_type);
+              else
+                  convertToSingleWithOffset(&in_val_conv, in_vars[j].ptr, 0, i, (ApproxType) in_vars[j].data_type);
               real_t dist = fabs(RTEnvd.iTable[i_tab_offset+(k*(*RTEnvd.iSize))+offset+(i*omp_get_num_threads()+omp_get_thread_num())] - in_val_conv);
               dist_total += dist;
             }
@@ -454,8 +490,14 @@ void __approx_device_memo(void (*accurateFN)(void *), void *arg, int memo_type, 
           for(int i = 0; i < in_vars[j].num_elem; i++)
             {
               entry_index = RTEnvd.inputIdx[offset+(i*omp_get_num_threads()+omp_get_thread_num())+i_tab_offset];
-              convertToSingleWithOffset(RTEnvd.iTable, in_vars[j].ptr, (i*omp_get_num_threads()+omp_get_thread_num())+offset+i_tab_offset+(*RTEnvd.iSize*entry_index), i,
-                                        (ApproxType) in_vars[j].data_type);
+
+              if(omp_get_thread_num() < n_inp_val_in_sm)
+                convertToSingleWithOffset(RTEnvd.iTable, inp_sm, (i*omp_get_num_threads()+omp_get_thread_num())+offset+i_tab_offset+(*RTEnvd.iSize*entry_index),
+                                          (i*n_inp_val_in_sm+omp_get_thread_num())+offset, (ApproxType) in_vars[j].data_type
+                                          );
+              else
+                convertToSingleWithOffset(RTEnvd.iTable, in_vars[j].ptr, (i*omp_get_num_threads()+omp_get_thread_num())+offset+i_tab_offset+(*RTEnvd.iSize*entry_index), i,
+                                          (ApproxType) in_vars[j].data_type);
               size_t idx_ofset = i_tab_offset+offset+(i*omp_get_num_threads()+omp_get_thread_num());
               RTEnvd.inputIdx[idx_ofset] = min(*RTEnvd.tabNumEntries-1, RTEnvd.inputIdx[idx_ofset]+1);
 
