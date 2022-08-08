@@ -545,9 +545,6 @@ void __approx_device_memo(void (*accurateFN)(void *), void *arg, int memo_type, 
     {
       RTEnvd.iTable[i+gmem_start] = ipt_table[i];
     }
-
-  syncThreadsAligned();
-
 }
 #pragma omp end declare target
 
