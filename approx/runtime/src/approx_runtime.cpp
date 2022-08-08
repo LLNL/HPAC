@@ -447,17 +447,17 @@ void __approx_device_memo(void (*accurateFN)(void *), void *arg, int memo_type, 
       // syncThreadsAligned();
 
       offset = 0;
-  {
-    int tid_in_block = omp_get_thread_num();
-    int tid_in_warp = tid_in_block % NTHREADS_PER_WARP;
-    int warp_in_block = tid_in_block / NTHREADS_PER_WARP;
-    int table_in_warp = tid_in_warp / (NTHREADS_PER_WARP/TABLES_PER_WARP);
-    int table_number = warp_in_block * TABLES_PER_WARP + table_in_warp;
-
       for(int j = 0; j < nOutputs; j++)
         {
           for(int i = 0; i < out_vars[j].num_elem; i++)
             {
+              int tid_in_block = omp_get_thread_num();
+              int tid_in_warp = tid_in_block % NTHREADS_PER_WARP;
+              int warp_in_block = tid_in_block / NTHREADS_PER_WARP;
+              int table_in_warp = tid_in_warp / (NTHREADS_PER_WARP/TABLES_PER_WARP);
+              int table_number = warp_in_block * TABLES_PER_WARP + table_in_warp;
+
+
               int row_number = entry_index * n_output_values + offset + i;
               int access_idx = (row_number * tables_per_block) + table_number;
 
@@ -470,7 +470,6 @@ void __approx_device_memo(void (*accurateFN)(void *), void *arg, int memo_type, 
           offset += out_vars[j].num_elem;
         }
 
-  }
       #ifdef APPROX_DEV_STATS
       RTEnvd.approx_count[tid_global] += 1;
       #endif // APPROX_DEV_STATS
@@ -480,17 +479,16 @@ void __approx_device_memo(void (*accurateFN)(void *), void *arg, int memo_type, 
 
       offset = 0;
       // NOTE: for correctness of inout, we have to copy the input before calling accurateFN
-  {
-    int tid_in_block = omp_get_thread_num();
-    int tid_in_warp = tid_in_block % NTHREADS_PER_WARP;
-    int warp_in_block = tid_in_block / NTHREADS_PER_WARP;
-    int table_in_warp = tid_in_warp / (NTHREADS_PER_WARP/TABLES_PER_WARP);
-    int table_number = warp_in_block * TABLES_PER_WARP + table_in_warp;
-
       for(int j = 0; j < nInputs; j++)
         {
           for(int i = 0; i < in_vars[j].num_elem; i++)
             {
+              int tid_in_block = omp_get_thread_num();
+              int tid_in_warp = tid_in_block % NTHREADS_PER_WARP;
+              int warp_in_block = tid_in_block / NTHREADS_PER_WARP;
+              int table_in_warp = tid_in_warp / (NTHREADS_PER_WARP/TABLES_PER_WARP);
+              int table_number = warp_in_block * TABLES_PER_WARP + table_in_warp;
+
               int row_number = offset + i;
               int column_number = table_number;
               int access_idx = (row_number * tables_per_block) + table_number;
@@ -521,12 +519,18 @@ void __approx_device_memo(void (*accurateFN)(void *), void *arg, int memo_type, 
       // I certainly wrote here above, we just use entry index as the row number
       // We want to subtract 1 to get entry index before it was incremented above,
       // ensuring it is always above 0
-      entry_index = max(RTEnvd.inputIdx[tables_per_block * omp_get_team_num() + table_number]-1, 0);
       // TODO: this should be size_t
       for(int j = 0; j < nOutputs; j++)
         {
           for(size_t i = 0; i < out_vars[j].num_elem; i++)
             {
+              int tid_in_block = omp_get_thread_num();
+              int tid_in_warp = tid_in_block % NTHREADS_PER_WARP;
+              int warp_in_block = tid_in_block / NTHREADS_PER_WARP;
+              int table_in_warp = tid_in_warp / (NTHREADS_PER_WARP/TABLES_PER_WARP);
+              int table_number = warp_in_block * TABLES_PER_WARP + table_in_warp;
+
+              entry_index = max(RTEnvd.inputIdx[tables_per_block * omp_get_team_num() + table_number]-1, 0);
               int row_number = entry_index * n_output_values + offset + i;
               int access_idx = (row_number * tables_per_block) + table_number;
 
@@ -535,7 +539,6 @@ void __approx_device_memo(void (*accurateFN)(void *), void *arg, int memo_type, 
             }
           offset += out_vars[j].num_elem;
         }
-    }
       }
 
   for(int i = omp_get_thread_num(); i < s_tab_size; i += omp_get_num_threads())
