@@ -405,13 +405,14 @@ void __approx_device_memo(void (*accurateFN)(void *), void *arg, int memo_type, 
 
   syncThreadsAligned();
 
-  int tid_in_block = omp_get_thread_num();
-  int tid_in_warp = tid_in_block % NTHREADS_PER_WARP;
-  int warp_in_block = tid_in_block / NTHREADS_PER_WARP;
-  int table_in_warp = tid_in_warp / (NTHREADS_PER_WARP/TABLES_PER_WARP);
-  int table_number = warp_in_block * TABLES_PER_WARP + table_in_warp;
-
   offset = 0;
+
+  {
+    int tid_in_block = omp_get_thread_num();
+    int tid_in_warp = tid_in_block % NTHREADS_PER_WARP;
+    int warp_in_block = tid_in_block / NTHREADS_PER_WARP;
+    int table_in_warp = tid_in_warp / (NTHREADS_PER_WARP/TABLES_PER_WARP);
+    int table_number = warp_in_block * TABLES_PER_WARP + table_in_warp;
 
   for(int k = 0; RTEnvd.inputIdx[tables_per_block * omp_get_team_num() + table_number]; k++)
     {
@@ -439,12 +440,20 @@ void __approx_device_memo(void (*accurateFN)(void *), void *arg, int memo_type, 
           break;
         }
     }
+  }
 
   if(entry_index != -1 && dist_total < *RTEnvd.threshold)
     {
       // syncThreadsAligned();
 
       offset = 0;
+  {
+    int tid_in_block = omp_get_thread_num();
+    int tid_in_warp = tid_in_block % NTHREADS_PER_WARP;
+    int warp_in_block = tid_in_block / NTHREADS_PER_WARP;
+    int table_in_warp = tid_in_warp / (NTHREADS_PER_WARP/TABLES_PER_WARP);
+    int table_number = warp_in_block * TABLES_PER_WARP + table_in_warp;
+
       for(int j = 0; j < nOutputs; j++)
         {
           for(int i = 0; i < out_vars[j].num_elem; i++)
@@ -461,6 +470,7 @@ void __approx_device_memo(void (*accurateFN)(void *), void *arg, int memo_type, 
           offset += out_vars[j].num_elem;
         }
 
+  }
       #ifdef APPROX_DEV_STATS
       RTEnvd.approx_count[tid_global] += 1;
       #endif // APPROX_DEV_STATS
@@ -470,6 +480,13 @@ void __approx_device_memo(void (*accurateFN)(void *), void *arg, int memo_type, 
 
       offset = 0;
       // NOTE: for correctness of inout, we have to copy the input before calling accurateFN
+  {
+    int tid_in_block = omp_get_thread_num();
+    int tid_in_warp = tid_in_block % NTHREADS_PER_WARP;
+    int warp_in_block = tid_in_block / NTHREADS_PER_WARP;
+    int table_in_warp = tid_in_warp / (NTHREADS_PER_WARP/TABLES_PER_WARP);
+    int table_number = warp_in_block * TABLES_PER_WARP + table_in_warp;
+
       for(int j = 0; j < nInputs; j++)
         {
           for(int i = 0; i < in_vars[j].num_elem; i++)
@@ -519,6 +536,7 @@ void __approx_device_memo(void (*accurateFN)(void *), void *arg, int memo_type, 
           offset += out_vars[j].num_elem;
         }
     }
+      }
 
   for(int i = omp_get_thread_num(); i < s_tab_size; i += omp_get_num_threads())
     {
