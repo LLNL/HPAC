@@ -414,7 +414,7 @@ void __approx_device_memo(void (*accurateFN)(void *), void *arg, int memo_type, 
     int table_in_warp = tid_in_warp / (NTHREADS_PER_WARP/TABLES_PER_WARP);
     int table_number = warp_in_block * TABLES_PER_WARP + table_in_warp;
 
-  for(int k = 0; RTEnvd.inputIdx[tables_per_block * omp_get_team_num() + table_number]; k++)
+  for(int k = 0; k < RTEnvd.inputIdx[tables_per_block * omp_get_team_num() + table_number]; k++)
     {
       dist_total = 0;
       for(int j = 0; j < nInputs; j++)
@@ -479,6 +479,10 @@ void __approx_device_memo(void (*accurateFN)(void *), void *arg, int memo_type, 
 
       offset = 0;
       // NOTE: for correctness of inout, we have to copy the input before calling accurateFN
+
+      bool first_thread_in_table = omp_get_thread_num() % (NTHREADS_PER_WARP/TABLES_PER_WARP) == 0;
+      if(first_thread_in_table)
+        {
       for(int j = 0; j < nInputs; j++)
         {
           for(int i = 0; i < in_vars[j].num_elem; i++)
@@ -502,11 +506,10 @@ void __approx_device_memo(void (*accurateFN)(void *), void *arg, int memo_type, 
 
 
               size_t idx_ofset = tables_per_block * omp_get_team_num() + table_number;
-              RTEnvd.inputIdx[idx_ofset] = min(*RTEnvd.tabNumEntries-1, RTEnvd.inputIdx[idx_ofset]+1);
-
-
+                  RTEnvd.inputIdx[idx_ofset] = min(*RTEnvd.tabNumEntries-1, RTEnvd.inputIdx[idx_ofset]+1);
             }
           offset += in_vars[j].num_elem;
+        }
         }
 
       accurateFN(arg);
@@ -520,6 +523,9 @@ void __approx_device_memo(void (*accurateFN)(void *), void *arg, int memo_type, 
       // We want to subtract 1 to get entry index before it was incremented above,
       // ensuring it is always above 0
       // TODO: this should be size_t
+
+      if(first_thread_in_table)
+        {
       for(int j = 0; j < nOutputs; j++)
         {
           for(size_t i = 0; i < out_vars[j].num_elem; i++)
@@ -540,11 +546,13 @@ void __approx_device_memo(void (*accurateFN)(void *), void *arg, int memo_type, 
           offset += out_vars[j].num_elem;
         }
       }
+    }
 
   for(int i = omp_get_thread_num(); i < s_tab_size; i += omp_get_num_threads())
     {
       RTEnvd.iTable[i+gmem_start] = ipt_table[i];
     }
+  syncThreadsAligned();
 }
 #pragma omp end declare target
 
