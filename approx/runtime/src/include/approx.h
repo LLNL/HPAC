@@ -21,7 +21,7 @@ void __approx_exec_call(void (*accurate)(void *), void (*perforate)(void *),
                         void *arg, bool cond, const char *region_name, void *perfoArgs, int memo_type,
                         void *inputs, int num_inputs, void *outputs,
                         int num_outputs);
-#pragma omp declare target
+#pragma omp begin declare target device_type(nohost)
 void __approx_device_memo(void (*accurateFN)(void *), void *arg, int memo_type, void *in_data, int nInputs, void *out_data, int nOutputs);
 #pragma omp end declare target
 const float approx_rt_get_percentage();
