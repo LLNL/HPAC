@@ -30,13 +30,47 @@
 
     // TODO: this should go to cmake
 #define NTHREADS_IN_WARP 32
-#pragma omp begin declare target
+#pragma omp begin declare target device_type(nohost)
 void syncThreadsAligned(){};
+unsigned int warpReduceMax(unsigned mask, unsigned int value) {return 0;}
+unsigned int warpBallot(unsigned int mask, bool pred) { return 0;}
+unsigned int ffs(unsigned int val) { return __builtin_ffs(val);}
+unsigned int popc(unsigned int val) { return __builtin_popcount(val);}
+void syncWarp(unsigned int mask) {}
+unsigned int activeMask() {return 0;}
+// normalize a float in the range [FLOAT_MIN, FLOAT_MAX] to [0, UINT_MAX]
+unsigned int renormalize(float t)
+{
+  constexpr float max1 = MAX_EXPECTED_DIST;
+  constexpr float min1 = 0.0f;
+
+  constexpr float max2 = 1;
+  constexpr float min2 = 0;
+
+  // a = (max'-min')/(max-min)
+  constexpr float a = (max2-min2)/(max1-min1);
+  // b = max - a * max
+  constexpr float b = max1 - a * max1;
+
+  //(max'-min')/(max-min)*(value-max)+max'
+  float new_val = (max2-min2)/(max1-min1)*(t-max1)+max2;
+  return new_val * std::numeric_limits<unsigned int>::max();
+  // return (a*t + b)*std::numeric_limits<unsigned int>::max();
+}
 #pragma omp end declare target
 #pragma omp begin declare variant match(                                       \
     device = {arch(nvptx, nvptx64)}, implementation = {extension(match_any)})
 void syncThreadsAligned() { __syncthreads(); }
+unsigned int warpReduceMax(unsigned int mask, unsigned int value) { return __nvvm_redux_sync_umax(value, mask);}
+unsigned int warpBallot(unsigned int mask, bool pred) { return __nvvm_vote_ballot_sync(mask, pred);}
+void syncWarp(unsigned int mask) { return __nvvm_bar_warp_sync(mask);}
+unsigned int activeMask() {
+  unsigned int Mask;
+  asm("activemask.b32 %0;" : "=r"(Mask));
+  return Mask;
+}
 #pragma omp end declare variant
+#define FULL_MASK 0xFFFFFFFF
 
 
 
@@ -363,13 +397,53 @@ const int approx_rt_get_step(){
 }
 
 #pragma omp begin declare target device_type(nohost)
+
+// return the global thread number of the thread in my table
+// that has the maximum distance to other values seen
+unsigned int tnum_in_table_with_max_dist(float max_dist, unsigned int writeMask)
+{
+
+  if(NTHREADS_PER_WARP == TABLES_PER_WARP)
+    {
+      return omp_get_num_threads() * omp_get_team_num() + omp_get_thread_num();
+    }
+
+  int tid_in_block = omp_get_thread_num();
+  int tid_in_warp = tid_in_block % NTHREADS_PER_WARP;
+  int warp_in_block = tid_in_block / NTHREADS_PER_WARP;
+  int table_in_warp = tid_in_warp / (NTHREADS_PER_WARP/TABLES_PER_WARP);
+  int table_number = warp_in_block * TABLES_PER_WARP + table_in_warp;
+  unsigned int threads_per_table = (NTHREADS_PER_WARP/TABLES_PER_WARP);
+  unsigned int thread_in_table = tid_in_warp % threads_per_table;
+
+  unsigned int my_mask = 0;
+  unsigned int firstThreadWithMax = 0;
+
+  if(threads_per_table == NTHREADS_PER_WARP)
+    my_mask = FULL_MASK;
+  else
+      my_mask = ((1 << threads_per_table) - 1) << (threads_per_table*table_in_warp);
+
+  // only consider the threads that did not find a table match
+  my_mask &= writeMask;
+
+  unsigned int my_dist = renormalize(max_dist);
+  unsigned int max_dist_warp = warpReduceMax(my_mask, my_dist);
+  unsigned int shift = threads_per_table * table_in_warp;
+  if(threads_per_table == NTHREADS_PER_WARP)
+    shift = 0;
+  unsigned int hasMax = warpBallot(my_mask, my_dist == max_dist_warp) >> shift;
+  //-1 because ffs(0) = 0, ffs(1) = 1. hasMax should never be zero
+  firstThreadWithMax = ffs(hasMax) - 1;
+
+  return (firstThreadWithMax + table_number * threads_per_table) + (omp_get_num_threads() * omp_get_team_num());
+}
+
 void __approx_device_memo(void (*accurateFN)(void *), void *arg, int memo_type, void *in_data, int nInputs, void *out_data, int nOutputs)
 {
   approx_var_info_t *in_vars = (approx_var_info_t*) in_data;
   approx_var_info_t *out_vars = (approx_var_info_t*) out_data;
   int tid_global = omp_get_thread_num() + omp_get_team_num() * omp_get_num_threads();
-  int offset = 0;
-  real_t dist_total = 0;
   real_t n_input_values = 0.0;
   int entry_index = -1;
   size_t i_tab_offset = 0;
@@ -392,8 +466,8 @@ void __approx_device_memo(void (*accurateFN)(void *), void *arg, int memo_type, 
 
   n_input_values = i_tab_offset;
 
-  int tables_per_block = omp_get_num_threads() / (NTHREADS_PER_WARP / TABLES_PER_WARP);
-  int s_tab_size = ((n_input_values)*tables_per_block**RTEnvd.tabNumEntries);
+  int tables_per_block = (omp_get_num_threads()/NTHREADS_PER_WARP) * TABLES_PER_WARP;
+  int s_tab_size = ((int)(n_input_values)*tables_per_block**RTEnvd.tabNumEntries);
   int gmem_start = s_tab_size * omp_get_team_num();
 
   // copy the input table in a block-stride loop
@@ -405,7 +479,9 @@ void __approx_device_memo(void (*accurateFN)(void *), void *arg, int memo_type, 
 
   syncThreadsAligned();
 
-  offset = 0;
+  int offset = 0;
+  real_t dist_total = 0;
+  real_t my_max_dist = 0.0f;
 
   {
     int tid_in_block = omp_get_thread_num();
@@ -427,12 +503,14 @@ void __approx_device_memo(void (*accurateFN)(void *), void *arg, int memo_type, 
               real_t in_val_conv = 0;
               convertToSingleWithOffset(&in_val_conv, in_vars[j].ptr, 0, i, (ApproxType) in_vars[j].data_type);
               real_t dist = fabs(ipt_table[access_idx] - in_val_conv);
+              dist_total += dist;
             }
 
           offset += in_vars[j].num_elem;
         }
 
       dist_total /= n_input_values;
+      my_max_dist = max(my_max_dist, dist_total);
       // TODO: is divergence an issue?
       if(dist_total < *RTEnvd.threshold)
         {
@@ -442,10 +520,10 @@ void __approx_device_memo(void (*accurateFN)(void *), void *arg, int memo_type, 
     }
   }
 
+  unsigned int threadsThatWillWrite = warpBallot(FULL_MASK, !(entry_index != -1 && dist_total < *RTEnvd.threshold));
+
   if(entry_index != -1 && dist_total < *RTEnvd.threshold)
     {
-      // syncThreadsAligned();
-
       offset = 0;
       for(int j = 0; j < nOutputs; j++)
         {
@@ -480,36 +558,37 @@ void __approx_device_memo(void (*accurateFN)(void *), void *arg, int memo_type, 
       offset = 0;
       // NOTE: for correctness of inout, we have to copy the input before calling accurateFN
 
-      bool first_thread_in_table = omp_get_thread_num() % (NTHREADS_PER_WARP/TABLES_PER_WARP) == 0;
-      if(first_thread_in_table)
+      bool have_max_dist = tnum_in_table_with_max_dist(my_max_dist, threadsThatWillWrite) == tid_global;
+      if(have_max_dist)
         {
-      for(int j = 0; j < nInputs; j++)
-        {
-          for(int i = 0; i < in_vars[j].num_elem; i++)
+          int idx_offset = 0;
+          for(int j = 0; j < nInputs; j++)
             {
-              int tid_in_block = omp_get_thread_num();
-              int tid_in_warp = tid_in_block % NTHREADS_PER_WARP;
-              int warp_in_block = tid_in_block / NTHREADS_PER_WARP;
-              int table_in_warp = tid_in_warp / (NTHREADS_PER_WARP/TABLES_PER_WARP);
-              int table_number = warp_in_block * TABLES_PER_WARP + table_in_warp;
+              for(int i = 0; i < in_vars[j].num_elem; i++)
+                {
+                  int tid_in_block = omp_get_thread_num();
+                  int tid_in_warp = tid_in_block % NTHREADS_PER_WARP;
+                  int warp_in_block = tid_in_block / NTHREADS_PER_WARP;
+                  int table_in_warp = tid_in_warp / (NTHREADS_PER_WARP/TABLES_PER_WARP);
+                  int table_number = warp_in_block * TABLES_PER_WARP + table_in_warp;
 
-              int row_number = offset + i;
-              int column_number = table_number;
-              int access_idx = (row_number * tables_per_block) + table_number;
+                  int row_number = offset + i;
+                  int column_number = table_number;
+                  int access_idx = (row_number * tables_per_block) + table_number;
 
-              entry_index = RTEnvd.inputIdx[tables_per_block * omp_get_team_num() + table_number];
-              row_number = entry_index * n_input_values + offset + i;
-              access_idx = (row_number * tables_per_block) + table_number;
+                  entry_index = RTEnvd.inputIdx[tables_per_block * omp_get_team_num() + table_number];
+                  row_number = entry_index * n_input_values + offset + i;
+                  access_idx = (row_number * tables_per_block) + table_number;
 
-              convertToSingleWithOffset(ipt_table, in_vars[j].ptr, access_idx, i,
-                                        (ApproxType) in_vars[j].data_type);
+                  convertToSingleWithOffset(ipt_table, in_vars[j].ptr, access_idx, i,
+                                            (ApproxType) in_vars[j].data_type);
 
-
-              size_t idx_ofset = tables_per_block * omp_get_team_num() + table_number;
-                  RTEnvd.inputIdx[idx_ofset] = min(*RTEnvd.tabNumEntries-1, RTEnvd.inputIdx[idx_ofset]+1);
+                  idx_offset = tables_per_block * omp_get_team_num() + table_number;
+                }
+              offset += in_vars[j].num_elem;
             }
-          offset += in_vars[j].num_elem;
-        }
+
+          RTEnvd.inputIdx[idx_offset] = min(*RTEnvd.tabNumEntries-1, RTEnvd.inputIdx[idx_offset]+1);
         }
 
       accurateFN(arg);
@@ -524,7 +603,7 @@ void __approx_device_memo(void (*accurateFN)(void *), void *arg, int memo_type, 
       // ensuring it is always above 0
       // TODO: this should be size_t
 
-      if(first_thread_in_table)
+      if(have_max_dist)
         {
       for(int j = 0; j < nOutputs; j++)
         {
@@ -548,11 +627,13 @@ void __approx_device_memo(void (*accurateFN)(void *), void *arg, int memo_type, 
       }
     }
 
+  // race condition between writer thread that has max dist and other threads
+  syncThreadsAligned();
   for(int i = omp_get_thread_num(); i < s_tab_size; i += omp_get_num_threads())
     {
       RTEnvd.iTable[i+gmem_start] = ipt_table[i];
     }
-  syncThreadsAligned();
+
 }
 #pragma omp end declare target
 
