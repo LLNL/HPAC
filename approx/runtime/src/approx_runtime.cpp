@@ -467,7 +467,7 @@ void __approx_device_memo(void (*accurateFN)(void *), void *arg, int memo_type, 
   n_input_values = i_tab_offset;
 
   int tables_per_block = (omp_get_num_threads()/NTHREADS_PER_WARP) * TABLES_PER_WARP;
-  int s_tab_size = ((int)(n_input_values)*tables_per_block**RTEnvd.tabNumEntries);
+  int s_tab_size = ((int)(n_input_values)*tables_per_block*(*RTEnvd.tabNumEntries));
   int gmem_start = s_tab_size * omp_get_team_num();
 
   // copy the input table in a block-stride loop
@@ -493,6 +493,7 @@ void __approx_device_memo(void (*accurateFN)(void *), void *arg, int memo_type, 
   for(int k = 0; k < RTEnvd.inputIdx[tables_per_block * omp_get_team_num() + table_number]; k++)
     {
       dist_total = 0;
+      offset = 0;
       for(int j = 0; j < nInputs; j++)
         {
           for(int i = 0; i < in_vars[j].num_elem; i++)
@@ -559,6 +560,7 @@ void __approx_device_memo(void (*accurateFN)(void *), void *arg, int memo_type, 
       // NOTE: for correctness of inout, we have to copy the input before calling accurateFN
 
       bool have_max_dist = tnum_in_table_with_max_dist(my_max_dist, threadsThatWillWrite) == tid_global;
+
       if(have_max_dist)
         {
           int idx_offset = 0;
@@ -577,6 +579,7 @@ void __approx_device_memo(void (*accurateFN)(void *), void *arg, int memo_type, 
                   int access_idx = (row_number * tables_per_block) + table_number;
 
                   entry_index = RTEnvd.inputIdx[tables_per_block * omp_get_team_num() + table_number];
+
                   row_number = entry_index * n_input_values + offset + i;
                   access_idx = (row_number * tables_per_block) + table_number;
 
