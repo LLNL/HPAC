@@ -516,7 +516,7 @@ void __approx_device_memo(void (*accurateFN)(void *), void *arg, int memo_type, 
               int column_number = table_number;
               int access_idx = (row_number * tables_per_block) + table_number;
               real_t in_val_conv = 0;
-              convertToSingleWithOffset(&in_val_conv, in_vars[j].ptr, 0, i, (ApproxType) in_vars[j].data_type);
+              convertToSingleWithOffsetIptRead(&in_val_conv, in_vars[j].ptr, 0, i, (ApproxType) in_vars[j].data_type);
               real_t dist = fabs(ipt_table[access_idx] - in_val_conv);
               dist_total += dist;
             }
@@ -599,7 +599,7 @@ void __approx_device_memo(void (*accurateFN)(void *), void *arg, int memo_type, 
                   row_number = entry_index * n_input_values + offset + i;
                   access_idx = (row_number * tables_per_block) + table_number;
 
-                  convertToSingleWithOffset(ipt_table, in_vars[j].ptr, access_idx, i,
+                  convertToSingleWithOffsetIptCopy(ipt_table, in_vars[j].ptr, access_idx, i,
                                             (ApproxType) in_vars[j].data_type);
 
                   idx_offset = tables_per_block * omp_get_team_num() + table_number;
