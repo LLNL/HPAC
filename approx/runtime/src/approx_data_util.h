@@ -168,7 +168,10 @@ template<typename T>
 void convertToSingleWithOffset(T *dest, void *src, size_t dest_offset,
                                size_t src_offset, ApproxType Type){
     switch (Type) {
-#define APPROX_TYPE(Enum, CType, nameOfType)                                   \
+    case FLOAT:
+      dest[dest_offset] = (T)((float *)src)[src_offset];
+      return;
+// #define APPROX_TYPE(Enum, CType, nameOfType)                                   \
   case Enum:                                                                   \
     dest[dest_offset] = (T)((CType *)src)[src_offset];                         \
     return;
@@ -182,7 +185,10 @@ template<typename T>
 void convertFromSingleWithOffset(void *dest, T *src, size_t dest_offset,
                                size_t src_offset, ApproxType Type){
     switch (Type) {
-#define APPROX_TYPE(Enum, CType, nameOfType)                                   \
+    case FLOAT:
+      ((float*)dest)[dest_offset] = (T)src[src_offset];
+      return
+// #define APPROX_TYPE(Enum, CType, nameOfType)                                   \
   case Enum:                                                                   \
     ((CType*)dest)[dest_offset] = (T)src[src_offset];        \
     return;
