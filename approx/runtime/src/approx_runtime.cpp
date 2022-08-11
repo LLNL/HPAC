@@ -38,25 +38,8 @@ unsigned int ffs(unsigned int val) { return __builtin_ffs(val);}
 unsigned int popc(unsigned int val) { return __builtin_popcount(val);}
 void syncWarp(unsigned int mask) {}
 unsigned int activeMask() {return 0;}
-// normalize a float in the range [FLOAT_MIN, FLOAT_MAX] to [0, UINT_MAX]
-unsigned int renormalize(float t)
-{
-  constexpr float max1 = MAX_EXPECTED_DIST;
-  constexpr float min1 = 0.0f;
-
-  constexpr float max2 = 1;
-  constexpr float min2 = 0;
-
-  // a = (max'-min')/(max-min)
-  constexpr float a = (max2-min2)/(max1-min1);
-  // b = max - a * max
-  constexpr float b = max1 - a * max1;
-
-  //(max'-min')/(max-min)*(value-max)+max'
-  float new_val = (max2-min2)/(max1-min1)*(t-max1)+max2;
-  return new_val * std::numeric_limits<unsigned int>::max();
-  // return (a*t + b)*std::numeric_limits<unsigned int>::max();
-}
+float reduceMaxImpl(unsigned int mask, float value, unsigned int shift) {return 0.0f;}
+float warpShuffleXOR(unsigned int mask, float value, int lanemask){return 0.0f;}
 #pragma omp end declare target
 #pragma omp begin declare variant match(                                       \
     device = {arch(nvptx, nvptx64)}, implementation = {extension(match_any)})
@@ -64,11 +47,26 @@ void syncThreadsAligned() { __syncthreads(); }
 unsigned int warpReduceMax(unsigned int mask, unsigned int value) { return __nvvm_redux_sync_umax(value, mask);}
 unsigned int warpBallot(unsigned int mask, bool pred) { return __nvvm_vote_ballot_sync(mask, pred);}
 void syncWarp(unsigned int mask) { return __nvvm_bar_warp_sync(mask);}
+float warpShuffleXOR(unsigned int mask, float value, int lanemask){ return __nvvm_shfl_sync_bfly_f32(mask, value, lanemask, 0);}
+
 unsigned int activeMask() {
   unsigned int Mask;
   asm("activemask.b32 %0;" : "=r"(Mask));
   return Mask;
 }
+
+// max reduction among threads named in the mask.
+// the threads named in 'mask' must be a power of 2
+float reduceMaxImpl(unsigned int mask, float value, unsigned int shift)
+{
+  unsigned int num_participants = popc(mask);
+  for(int i = 1; i < num_participants; i *= 2)
+    {
+      value = fmax(warpShuffleXOR(mask, value, i<<shift), value);
+    }
+  return value;
+}
+
 #pragma omp end declare variant
 #define FULL_MASK 0xFFFFFFFF
 
@@ -420,7 +418,7 @@ const int approx_rt_get_step(){
 
 // return the global thread number of the thread in my table
 // that has the maximum distance to other values seen
-unsigned int tnum_in_table_with_max_dist(float max_dist, unsigned int writeMask)
+unsigned int tnum_in_table_with_max_dist(float max_dist)
 {
 
   if(NTHREADS_PER_WARP == TABLES_PER_WARP)
@@ -444,15 +442,11 @@ unsigned int tnum_in_table_with_max_dist(float max_dist, unsigned int writeMask)
   else
       my_mask = ((1 << threads_per_table) - 1) << (threads_per_table*table_in_warp);
 
-  // only consider the threads that did not find a table match
-  my_mask &= writeMask;
-
-  unsigned int my_dist = renormalize(max_dist);
-  unsigned int max_dist_warp = warpReduceMax(my_mask, my_dist);
   unsigned int shift = threads_per_table * table_in_warp;
   if(threads_per_table == NTHREADS_PER_WARP)
     shift = 0;
-  unsigned int hasMax = warpBallot(my_mask, my_dist == max_dist_warp) >> shift;
+  float max_dist_warp = reduceMaxImpl(my_mask, max_dist, shift);
+  unsigned int hasMax = warpBallot(my_mask, max_dist == max_dist_warp) >> shift;
   //-1 because ffs(0) = 0, ffs(1) = 1. hasMax should never be zero
   firstThreadWithMax = ffs(hasMax) - 1;
 
@@ -541,7 +535,9 @@ void __approx_device_memo(void (*accurateFN)(void *), void *arg, int memo_type, 
     }
   }
 
-  unsigned int threadsThatWillWrite = warpBallot(FULL_MASK, !(entry_index != -1 && dist_total < *RTEnvd.threshold));
+  // every thread needs to participate because we use butterfly reduction
+  // that requires power of 2 participation
+  bool have_max_dist = tnum_in_table_with_max_dist(my_max_dist) == tid_global;
 
   if(entry_index != -1 && dist_total < *RTEnvd.threshold)
     {
@@ -580,8 +576,6 @@ void __approx_device_memo(void (*accurateFN)(void *), void *arg, int memo_type, 
 
       offset = 0;
       // NOTE: for correctness of inout, we have to copy the input before calling accurateFN
-
-      bool have_max_dist = tnum_in_table_with_max_dist(my_max_dist, threadsThatWillWrite) == tid_global;
 
       if(have_max_dist)
         {
