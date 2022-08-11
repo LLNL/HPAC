@@ -639,7 +639,7 @@ void __approx_device_memo(void (*accurateFN)(void *), void *arg, int memo_type, 
               int access_idx = (row_number * tables_per_block) + table_number;
 
 
-              int o_tab_size = (n_input_values*tables_per_block*(*RTEnvd.tabNumEntries));
+              int o_tab_size = (n_output_values*tables_per_block*(*RTEnvd.tabNumEntries));
               int gmem_start_o = o_tab_size * omp_get_team_num();
               convertToSingleWithOffset(RTEnvd.oTable, out_vars[j].ptr, access_idx+gmem_start_o, i,
                                         (ApproxType) out_vars[j].data_type);
