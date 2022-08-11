@@ -194,6 +194,26 @@ void resetDeviceTable(float newThresh, size_t newiSize, size_t newoSize, int new
   #endif // APPROX_DEV_STATS
 }
 
+  int getNThreadsPerWarp()
+  {
+    return NTHREADS_PER_WARP;
+  }
+  int getNTablesPerWarp()
+  {
+    return TABLES_PER_WARP;
+  }
+
+
+  int calcBlockTableSizeInBytes(int threadsPerBlock, int entriesPerTable, int itemSize, int totalInputValuesPerInvocation)
+  {
+    int warpsPerBlock = threadsPerBlock / NTHREADS_PER_WARP;
+    int tablesPerBlock = warpsPerBlock * TABLES_PER_WARP;
+    int entriesPerBlock = tablesPerBlock * entriesPerTable;
+    int entriesPerBlockAllInputs = entriesPerBlock * totalInputValuesPerInvocation;
+    int totalTableBytes = entriesPerBlockAllInputs * itemSize;
+    return totalTableBytes;
+  }
+
 void writeDeviceThreadStatistics(std::ostream& file){
   #ifdef APPROX_DEV_STATS
   file << "THREAD,ACCURATE,APPROX,RATIO\n";
@@ -539,10 +559,12 @@ void __approx_device_memo(void (*accurateFN)(void *), void *arg, int memo_type, 
 
               int row_number = entry_index * n_output_values + offset + i;
               int access_idx = (row_number * tables_per_block) + table_number;
+              int o_tab_size = (n_input_values*tables_per_block*(*RTEnvd.tabNumEntries));
+              int gmem_start_o = o_tab_size * omp_get_team_num();
 
               convertFromSingleWithOffset(out_vars[j].ptr,
                                           RTEnvd.oTable,
-                                          i, access_idx,
+                                          i, access_idx+gmem_start_o,
                                           (ApproxType) out_vars[j].data_type
                                           );
             }
@@ -591,7 +613,7 @@ void __approx_device_memo(void (*accurateFN)(void *), void *arg, int memo_type, 
               offset += in_vars[j].num_elem;
             }
 
-          RTEnvd.inputIdx[idx_offset] = min(*RTEnvd.tabNumEntries-1, RTEnvd.inputIdx[idx_offset]+1);
+          RTEnvd.inputIdx[idx_offset] = min(*RTEnvd.tabNumEntries, RTEnvd.inputIdx[idx_offset]+1);
         }
 
       accurateFN(arg);
@@ -622,8 +644,12 @@ void __approx_device_memo(void (*accurateFN)(void *), void *arg, int memo_type, 
               int row_number = entry_index * n_output_values + offset + i;
               int access_idx = (row_number * tables_per_block) + table_number;
 
-              convertToSingleWithOffset(RTEnvd.oTable, out_vars[j].ptr, access_idx, i,
+
+              int o_tab_size = (n_input_values*tables_per_block*(*RTEnvd.tabNumEntries));
+              int gmem_start_o = o_tab_size * omp_get_team_num();
+              convertToSingleWithOffset(RTEnvd.oTable, out_vars[j].ptr, access_idx+gmem_start_o, i,
                                         (ApproxType) out_vars[j].data_type);
+
             }
           offset += out_vars[j].num_elem;
         }

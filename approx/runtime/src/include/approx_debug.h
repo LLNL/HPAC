@@ -20,6 +20,9 @@ extern "C" {
   void resetDeviceTable(float threshold = -1.0, size_t newiSize = -1, size_t newoSize = -1, int numTabEntries = -1, int numThreads = -1);
   void setHostThreshold(float newThresh);
 float getDeviceThreshold();
+  int getNThreadsPerWarp();
+  int getNTablesPerWarp();
+  int calcBlockTableSizeInBytes(int threadsPerBlock, int entriesPerTable, int itemSize, int totalInputValuesPerInvocation);
 #ifdef APPROX_DEV_STATS
 void writeDeviceThreadStatistics(std::ostream& file);
 #endif

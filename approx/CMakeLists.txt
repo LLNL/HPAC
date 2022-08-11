@@ -31,6 +31,13 @@ else()
   add_compile_definitions(SM_SZ_IN_BYTES=0)
 endif()
 
+option(MAX_EXPECTED_DIST "Maximum expected distance between any values. Used internally for normalization.")
+if(MAX_EXPECTED_DIST)
+  add_compile_definitions(MAX_EXPECTED_DIST=${MAX_EXPECTED_DIST})
+else()
+  add_compile_definitions(MAX_EXPECTED_DIST=1000)
+endif()
+
 option(TABLES_PER_WARP "Number of memoization input tables to store for each warp.")
 if(TABLES_PER_WARP)
   add_compile_definitions(TABLES_PER_WARP=${TABLES_PER_WARP})
