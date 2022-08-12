@@ -949,7 +949,9 @@ void ASTStmtReader::VisitApproxArraySectionExpr(ApproxArraySectionExpr *E) {
   E->setBase(Record.readSubExpr());
   E->setLowerBound(Record.readSubExpr());
   E->setLength(Record.readSubExpr());
-  E->setColonLoc(readSourceLocation());
+  E->setStride(Record.readSubExpr());
+  E->setColonLocFirst(readSourceLocation());
+  E->setColonLocSecond(readSourceLocation());
   E->setRBracketLoc(readSourceLocation());
 }
 

@@ -5092,8 +5092,11 @@ void Sema::CheckSubscriptAccessOfNoDeref(const ArraySubscriptExpr *E) {
 
 ExprResult Sema::ActOnApproxArraySectionExpr(Expr *Base, SourceLocation LBLoc,
                                           Expr *LowerBound,
-                                          SourceLocation ColonLoc, Expr *Length,
+                                             SourceLocation ColonLocFirst,
+                                             SourceLocation ColonLocSecond,
+                                             Expr *Length, Expr *Stride,
                                           SourceLocation RBLoc) {
+
   if (Base->getType()->isPlaceholderType() &&
       !Base->getType()->isSpecificPlaceholderType(
           BuiltinType::ApproxArraySection)) {
@@ -5120,14 +5123,25 @@ ExprResult Sema::ActOnApproxArraySectionExpr(Expr *Base, SourceLocation LBLoc,
       return ExprError();
     Length = Result.get();
   }
+  if (Stride && Stride->getType()->isNonOverloadPlaceholderType()) {
+    ExprResult Result = CheckPlaceholderExpr(Stride);
+    if (Result.isInvalid())
+      return ExprError();
+    Result = DefaultLvalueConversion(Result.get());
+    if (Result.isInvalid())
+      return ExprError();
+    Stride = Result.get();
+  }
+
 
   if (Base->isTypeDependent() ||
       (LowerBound &&
        (LowerBound->isTypeDependent() || LowerBound->isValueDependent())) ||
-      (Length && (Length->isTypeDependent() || Length->isValueDependent()))) {
+      (Length && (Length->isTypeDependent() || Length->isValueDependent())) ||
+      (Stride && (Stride->isTypeDependent() || Stride->isValueDependent()))) {
     return new (Context)
-        ApproxArraySectionExpr(Base, LowerBound, Length, Context.DependentTy,
-                            VK_LValue, OK_Ordinary, ColonLoc, RBLoc);
+      ApproxArraySectionExpr(Base, LowerBound, Length, Stride, Context.DependentTy,
+                             VK_LValue, OK_Ordinary, ColonLocFirst, ColonLocSecond, RBLoc);
   }
 
   // Perform default conversions.
@@ -5171,6 +5185,20 @@ ExprResult Sema::ActOnApproxArraySectionExpr(Expr *Base, SourceLocation LBLoc,
       Diag(Length->getExprLoc(), diag::warn_approx_section_is_char)
           << 1 << Length->getSourceRange();
   }
+  if (Stride) {
+    ExprResult Res =
+        PerformApproxImplicitIntegerConversion(Stride->getExprLoc(), Stride);
+    if (Res.isInvalid())
+      return ExprError(Diag(Stride->getExprLoc(),
+                            diag::err_approx_typecheck_section_not_integer)
+                       << 1 << Stride->getSourceRange());
+    Stride = Res.get();
+
+    if (Stride->getType()->isSpecificBuiltinType(BuiltinType::Char_S) ||
+        Stride->getType()->isSpecificBuiltinType(BuiltinType::Char_U))
+      Diag(Stride->getExprLoc(), diag::warn_approx_section_is_char)
+          << 1 << Stride->getSourceRange();
+  }
 
   if (ResultTy->isFunctionType()) {
     Diag(Base->getExprLoc(), diag::err_approx_section_function_type)
@@ -5197,23 +5225,36 @@ ExprResult Sema::ActOnApproxArraySectionExpr(Expr *Base, SourceLocation LBLoc,
   if (Length) {
     Expr::EvalResult Result;
     if (Length->EvaluateAsInt(Result, Context)) {
+      // OpenMP 5.0, [2.1.5 Array Sections]
+      // The length must evaluate to non-negative integers.
       llvm::APSInt LengthValue = Result.Val.getInt();
-      // FIXME: What is a good value for this?
-      llvm::SmallString<64> LengthValueStr;
-      LengthValue.toString(/*Str=*/LengthValueStr, /*Radix=*/10, /*Signed=*/true);
       if (LengthValue.isNegative()) {
         Diag(Length->getExprLoc(), diag::err_approx_section_length_negative)
-            << LengthValueStr
+            << toString(LengthValue, /*Radix=*/10, /*Signed=*/true)
             << Length->getSourceRange();
         return ExprError();
       }
     }
-  } else if (ColonLoc.isValid() &&
+  } else if (ColonLocFirst.isValid() &&
              (OriginalTy.isNull() || (!OriginalTy->isConstantArrayType() &&
                                       !OriginalTy->isVariableArrayType()))) {
-    Diag(ColonLoc, diag::err_approx_section_length_undefined)
+    Diag(ColonLocFirst, diag::err_approx_section_length_undefined)
         << (!OriginalTy.isNull() && OriginalTy->isArrayType());
     return ExprError();
+  }
+  if (Stride) {
+    Expr::EvalResult Result;
+    if (Stride->EvaluateAsInt(Result, Context)) {
+      // OpenMP 5.0, [2.1.5 Array Sections]
+      // The stride must evaluate to a positive integer.
+      llvm::APSInt StrideValue = Result.Val.getInt();
+      if (!StrideValue.isStrictlyPositive()) {
+        Diag(Stride->getExprLoc(), diag::err_approx_section_stride_non_positive)
+            << toString(StrideValue, /*Radix=*/10, /*Signed=*/true)
+            << Stride->getSourceRange();
+        return ExprError();
+      }
+    }
   }
 
   if (!Base->getType()->isSpecificPlaceholderType(
@@ -5224,8 +5265,8 @@ ExprResult Sema::ActOnApproxArraySectionExpr(Expr *Base, SourceLocation LBLoc,
     Base = Result.get();
   }
   return new (Context)
-      ApproxArraySectionExpr(Base, LowerBound, Length, Context.ApproxArraySectionTy,
-                          VK_LValue, OK_Ordinary, ColonLoc, RBLoc);
+    ApproxArraySectionExpr(Base, LowerBound, Length, Stride, Context.ApproxArraySectionTy,
+                           VK_LValue, OK_Ordinary, ColonLocFirst, ColonLocSecond, RBLoc);
  }
 
 ExprResult Sema::ActOnOMPArraySectionExpr(Expr *Base, SourceLocation LBLoc,

@@ -5736,8 +5736,11 @@ public:
                                               SourceLocation RBLoc);
 
   ExprResult ActOnApproxArraySectionExpr(Expr *Base, SourceLocation LBLoc,
-                                      Expr *LowerBound, SourceLocation ColonLoc,
-                                      Expr *Length, SourceLocation RBLoc);
+                                         Expr *LowerBound,
+                                         SourceLocation ColonLocFirst,
+                                         SourceLocation ColonLocSecond,
+                                         Expr *Length, Expr *Stride,
+                                         SourceLocation RBLoc);
 
   ExprResult ActOnOMPArraySectionExpr(Expr *Base, SourceLocation LBLoc,
                                       Expr *LowerBound,

@@ -1982,10 +1982,10 @@ Parser::ParsePostfixExpressionSuffix(ExprResult LHS) {
             Length = Actions.CorrectDelayedTyposInExpr(Length);
           }
         }
-        if (getLangOpts().OpenMP >= 50 &&
+        if ((inApproxScope || (getLangOpts().OpenMP >= 50 &&
             (OMPClauseKind == llvm::omp::Clause::OMPC_to ||
-             OMPClauseKind == llvm::omp::Clause::OMPC_from) &&
-            Tok.is(tok::colon)) {
+             OMPClauseKind == llvm::omp::Clause::OMPC_from))) &&
+             Tok.is(tok::colon))) {
           // Consume ':'
           ColonLocSecond = ConsumeToken();
           if (Tok.isNot(tok::r_square)) {
@@ -2001,10 +2001,9 @@ Parser::ParsePostfixExpressionSuffix(ExprResult LHS) {
           !Stride.isInvalid() && Tok.is(tok::r_square)) {
         if (ColonLocFirst.isValid() || ColonLocSecond.isValid()) {
           if (inApproxScope){
-            assert(ColonLocFirst.isValid() && "Strided access not supported in HPAC");
             LHS = Actions.ActOnApproxArraySectionExpr(
                 LHS.get(), Loc, ArgExprs.empty() ? nullptr: ArgExprs[0],
-                ColonLocFirst, Length.get(), RLoc);
+                ColonLocFirst, ColonLocSecond, Length.get(), Stride.get(), RLoc);
           }else{
             LHS = Actions.ActOnOMPArraySectionExpr(
                 LHS.get(), Loc, ArgExprs.empty() ? nullptr : ArgExprs[0],

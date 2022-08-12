@@ -60,6 +60,7 @@ typedef struct approx_var_info_t {
   void *ptr;
   size_t num_elem;
   size_t sz_elem;
+  size_t stride;
   int8_t data_type;
   uint8_t dir;
 } approx_var_info_t;

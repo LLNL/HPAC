@@ -10457,6 +10457,8 @@ def err_approx_section_length_negative : Error<
   "section length is evaluated to a negative value %0">;
 def err_approx_section_length_undefined : Error<
   "section length is unspecified and cannot be inferred because subscripted value is %select{not an array|an array of unknown bound}0">;
+def err_approx_section_stride_non_positive : Error<
+  "section stride is evaluated to a non-positive value %0">;
 def err_approx_non_pointer_type_array_shaping_base : Error<
   "expected expression with a pointer to a complete type as a base of an array "
   "shaping operation">;

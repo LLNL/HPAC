@@ -19,20 +19,25 @@
 namespace clang {
 
 class ApproxArraySectionExpr : public Expr {
-  enum { BASE, LOWER_BOUND, LENGTH, END_EXPR };
+  enum { BASE, LOWER_BOUND, LENGTH, STRIDE, END_EXPR };
   Stmt *SubExprs[END_EXPR];
-  SourceLocation ColonLoc;
+  SourceLocation ColonLocFirst;
+  SourceLocation ColonLocSecond;
   SourceLocation RBracketLoc;
 
+
 public:
-  ApproxArraySectionExpr(Expr *Base, Expr *LowerBound, Expr *Length, QualType Type,
-                      ExprValueKind VK, ExprObjectKind OK,
-                      SourceLocation ColonLoc, SourceLocation RBracketLoc)
-      : Expr(ApproxArraySectionExprClass, Type, VK, OK), ColonLoc(ColonLoc),
+  ApproxArraySectionExpr(Expr *Base, Expr *LowerBound, Expr *Length, Expr *Stride,
+                         QualType Type, ExprValueKind VK, ExprObjectKind OK,
+                         SourceLocation ColonLocFirst, SourceLocation ColonLocSecond,
+                         SourceLocation RBracketLoc)
+      : Expr(ApproxArraySectionExprClass, Type, VK, OK), ColonLocFirst(ColonLocFirst),
+        ColonLocSecond(ColonLocSecond),
         RBracketLoc(RBracketLoc) {
     SubExprs[BASE] = Base;
     SubExprs[LOWER_BOUND] = LowerBound;
     SubExprs[LENGTH] = Length;
+    SubExprs[STRIDE] = Stride;
     setDependence(computeDependence(this));
   }
 
@@ -65,13 +70,22 @@ public:
   /// Set length of the array section.
   void setLength(Expr *E) { SubExprs[LENGTH] = E; }
 
+  /// Get stride of array section.
+  Expr *getStride() { return cast_or_null<Expr>(SubExprs[STRIDE]); }
+  const Expr *getStride() const { return cast_or_null<Expr>(SubExprs[STRIDE]); }
+  /// Set stride of the array section.
+  void setStride(Expr *E) { SubExprs[STRIDE] = E; }
+
   SourceLocation getBeginLoc() const LLVM_READONLY {
     return getBase()->getBeginLoc();
   }
   SourceLocation getEndLoc() const LLVM_READONLY { return RBracketLoc; }
 
-  SourceLocation getColonLoc() const { return ColonLoc; }
-  void setColonLoc(SourceLocation L) { ColonLoc = L; }
+  SourceLocation getColonLocFirst() const { return ColonLocFirst; }
+  void setColonLocFirst(SourceLocation L) { ColonLocFirst = L; }
+
+  SourceLocation getColonLocSecond() const { return ColonLocSecond; }
+  void setColonLocSecond(SourceLocation L) { ColonLocSecond = L; }
 
   SourceLocation getRBracketLoc() const { return RBracketLoc; }
   void setRBracketLoc(SourceLocation L) { RBracketLoc = L; }

@@ -80,12 +80,14 @@ int8_t convertToApproxType(const BuiltinType *T) {
   return approxType;
 }
 
-static std::tuple<llvm::Value *, llvm::Value *, llvm::Value *, llvm::Value *>
+static std::tuple<llvm::Value *, llvm::Value *, llvm::Value *, llvm::Value *, llvm::Value *>
 getPointerAndSize(CodeGenFunction &CGF, const Expr *E) {
   // Address of first Element.
   llvm::Value *Addr;
   // Total Size in Bytes.
   llvm::Value *Size;
+  // Stride number of items between access
+  llvm::Value *Stride;
   // Number of elements
   llvm::Value *NumElements;
   // Data Type
@@ -144,6 +146,19 @@ getPointerAndSize(CodeGenFunction &CGF, const Expr *E) {
     SizeOfElement = CGF.getTypeSize(ResultExprTy);
     NumElements = CGF.Builder.CreateUDiv(Size, SizeOfElement);
     TypeOfElement = llvm::ConstantInt::get(CGF.Builder.getInt8Ty(), TyKind);
+
+    // Get the stride integer value.
+    const Expr *StrideExpr = ASE->getStride();
+    Expr::EvalResult StrideResult;
+    if(!StrideExpr)
+      {
+        Stride = llvm::ConstantInt::get(CGF.Int64Ty, 1);
+      }
+    else {
+    Stride = CGF.Builder.CreateIntCast(CGF.EmitScalarExpr(StrideExpr),
+                                       CGF.Int64Ty, /*isSigned=*/false);
+    }
+
   } else {
     QualType Ty = E->getType();
     int TyKind = -1;
@@ -155,9 +170,10 @@ getPointerAndSize(CodeGenFunction &CGF, const Expr *E) {
     Size = SizeOfElement;
     QualType SizeOfType = CGF.getContext().getSizeType();
     NumElements = llvm::ConstantInt::get(CGF.ConvertType(SizeOfType), 1);
+    Stride = llvm::ConstantInt::get(CGF.Int64Ty, 1);
     TypeOfElement = llvm::ConstantInt::get(CGF.Builder.getInt8Ty(), TyKind);
   }
-  return std::make_tuple(Addr, NumElements, SizeOfElement, TypeOfElement);
+  return std::make_tuple(Addr, NumElements, SizeOfElement, Stride, TypeOfElement);
 }
 
 static FieldDecl *addFieldToRecordDecl(ASTContext &C, DeclContext *DC,
@@ -200,6 +216,8 @@ static void getVarInfoType(ASTContext &C, QualType &VarInfoTy) {
     /// number of elements
     addFieldToRecordDecl(C, VarInfoRD, SizeOfType);
     /// Sizeof(type)
+    addFieldToRecordDecl(C, VarInfoRD, SizeOfType);
+    /// stride of access
     addFieldToRecordDecl(C, VarInfoRD, SizeOfType);
     /// Data Type can be negative.
     /// The bitwidth will depend on the way we support
@@ -659,16 +677,17 @@ CGApproxRuntime::CGApproxRuntimeEmitData(
 
   const auto *VarInfoRecord = VarInfoTy->getAsRecordDecl();
   unsigned Pos = 0;
-  enum VarInfoFieldID { PTR, NUM_ELEM, SZ_ELEM, DATA_TYPE, DIR };
+  enum VarInfoFieldID { PTR, NUM_ELEM, SZ_ELEM, STRIDE, DATA_TYPE, DIR };
 
   for (auto P : Data) {
     llvm::Value *Addr;
     llvm::Value *NumElements;
     llvm::Value *TypeOfElement;
+    llvm::Value *AccessStride;
     llvm::Value *SizeOfElement;
     Expr *E = P.first;
     Directionality Dir = P.second;
-    std::tie(Addr, NumElements, SizeOfElement, TypeOfElement) =
+    std::tie(Addr, NumElements, SizeOfElement, AccessStride, TypeOfElement) =
         getPointerAndSize(CGF, E);
     // Store Addr
     LValue Base = CGF.MakeAddrLValue(
@@ -687,6 +706,11 @@ CGApproxRuntime::CGApproxRuntimeEmitData(
     LValue sElemLVal = CGF.EmitLValueForField(
         Base, *std::next(VarInfoRecord->field_begin(), SZ_ELEM));
     CGF.EmitStoreOfScalar(SizeOfElement, sElemLVal);
+
+    // Store STRIDE
+    LValue strideElemLVal = CGF.EmitLValueForField(
+        Base, *std::next(VarInfoRecord->field_begin(), STRIDE));
+    CGF.EmitStoreOfScalar(AccessStride, strideElemLVal);
 
     // Store DATA_TYPE
     LValue typeLVal = CGF.EmitLValueForField(

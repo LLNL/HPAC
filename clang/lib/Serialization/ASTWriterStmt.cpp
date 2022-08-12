@@ -812,7 +812,9 @@ void ASTStmtWriter::VisitApproxArraySectionExpr(ApproxArraySectionExpr *E) {
   Record.AddStmt(E->getBase());
   Record.AddStmt(E->getLowerBound());
   Record.AddStmt(E->getLength());
-  Record.AddSourceLocation(E->getColonLoc());
+  Record.AddStmt(E->getStride());
+  Record.AddSourceLocation(E->getColonLocFirst());
+  Record.AddSourceLocation(E->getColonLocSecond());
   Record.AddSourceLocation(E->getRBracketLoc());
   Code = serialization::EXPR_APPROX_ARRAY_SECTION;
 }
