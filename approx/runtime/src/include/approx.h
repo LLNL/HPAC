@@ -9,6 +9,8 @@
 /// This file defines the public accessible API to the approximate runtime system.
 ///
 //===----------------------------------------------------------------------===//
+#ifndef APPROX_HH_INCLUDED
+#define APPROX_HH_INCLUDED
 
 
 #include <stdbool.h>
@@ -16,6 +18,10 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
+enum TableReplacementPolicy : unsigned char{
+  CLOCK,
+  ROUND_ROBIN
+};
 bool __approx_skip_iteration(unsigned int i, float pr);
 void __approx_exec_call(void (*accurate)(void *), void (*perforate)(void *),
                         void *arg, bool cond, const char *region_name, void *perfoArgs, int memo_type,
@@ -33,3 +39,5 @@ extern int __approx_perfo_step__;
 #ifdef __cplusplus
 }
 #endif
+
+#endif //APPROX_HH_INCLUDED

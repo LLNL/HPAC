@@ -35,7 +35,6 @@
 #define FULL_MASK 0xFFFFFFFF
 
 
-
 using namespace std;
 
 #define MEMO_IN 1
@@ -50,6 +49,7 @@ enum ExecuteMode: uint8_t{
   EXECUTE
 };
 
+
 struct ApproxRuntimeDevMetadata
 {
   // don't transfer these to the device: they are used on the host
@@ -60,9 +60,11 @@ struct ApproxRuntimeDevMetadata
   int num_blocks;
   int num_tab_entries;
   int num_threads;
+  TableReplacementPolicy RP;
 };
 
 #pragma omp declare target
+
 class ApproxRuntimeDevDataEnv{
 
 public:
@@ -73,6 +75,7 @@ public:
   float *threshold = nullptr;
   real_t *iTable = nullptr;
   real_t *oTable = nullptr;
+  TableReplacementPolicy *TableRP = nullptr;
 #ifdef APPROX_DEV_STATS
   int *accurate_count = nullptr;
   int *approx_count = nullptr;
@@ -82,7 +85,7 @@ public:
   ApproxRuntimeDevDataEnv() = default;
 
 #pragma omp end declare target
-  void resetTable(float _threshold, int total_input_size, int total_output_size, int total_num_tables, int replacement_data_size, int num_blocks, int _numTableEntries, int _nthreads, ApproxRuntimeDevMetadata& RTMeta){
+  void resetTable(float _threshold, int total_input_size, int total_output_size, int total_num_tables, int replacement_data_size, int num_blocks, int _numTableEntries, int _nthreads, ApproxRuntimeDevMetadata& RTMeta, TableReplacementPolicy RP = CLOCK){
     // we want to have at least one 8-bit integer per table
     destruct();
     RTMeta.total_input_size = total_input_size;
@@ -92,6 +95,7 @@ public:
     RTMeta.num_blocks = num_blocks;
     RTMeta.num_tab_entries = _numTableEntries;
     RTMeta.num_threads = _nthreads;
+    RTMeta.RP = RP;
     threshold = new float[1];
     tabNumEntries = new int[1];
     tabNumEntries[0] = _numTableEntries;
@@ -102,6 +106,8 @@ public:
     ClockIndexes = new int[total_num_tables];
     iTable = new real_t[total_input_size];
     oTable = new real_t[total_output_size];
+    TableRP = new TableReplacementPolicy[1];
+    *TableRP = RP;
 
     #ifdef APPROX_DEV_STATS
     nthreads = new int[1];
@@ -128,6 +134,7 @@ public:
     delete[] ClockIndexes;
     delete[] iTable;
     delete[] oTable;
+    delete[] TableRP;
     #ifdef APPROX_DEV_STATS
     delete[] nthreads;
     delete[] accurate_count;
@@ -141,7 +148,7 @@ ApproxRuntimeDevDataEnv RTEnvd = ApproxRuntimeDevDataEnv();
 ApproxRuntimeDevMetadata RTMeta = ApproxRuntimeDevMetadata();
 #pragma omp end declare target
 
-void resetDeviceTable(float thresh, int threads_per_block, int num_blocks, int num_input_items_per_entry, int num_output_items_per_entry, int num_tab_entries, int num_threads){
+void resetDeviceTable(float thresh, int threads_per_block, int num_blocks, int num_input_items_per_entry, int num_output_items_per_entry, int num_tab_entries, int num_threads, TableReplacementPolicy RP){
   float threshold = thresh == -1.0 ? *RTEnvd.threshold : thresh;
   int numTabEntries = num_tab_entries == -1 ? *RTEnvd.tabNumEntries : num_tab_entries;
   if(num_threads == -1)
@@ -162,9 +169,9 @@ void resetDeviceTable(float thresh, int threads_per_block, int num_blocks, int n
       int oldNumEntries = *RTEnvd.tabNumEntries;
 
       #ifdef APPROX_DEV_STATS
-#pragma omp target exit data map(delete:RTEnvd, RTEnvd.threshold[0:1], RTEnvd.tabNumEntries[0:1], RTEnvd.inputIdx[0:RTMeta.total_num_tables], RTEnvd.ReplacementData[0:RTMeta.replacement_data_size], RTEnvd.ClockIndexes[0:RTMeta.total_num_tables], RTEnvd.iTable[0:RTMeta.total_input_size], RTEnvd.oTable[0:RTMeta.total_output_size], RTEnvd.accurate_count[0:RTMeta.num_threads], RTEnvd.approx_count[0:RTMeta.num_threads])
+#pragma omp target exit data map(delete:RTEnvd, RTEnvd.threshold[0:1], RTEnvd.tabNumEntries[0:1], RTEnvd.inputIdx[0:RTMeta.total_num_tables], RTEnvd.ReplacementData[0:RTMeta.replacement_data_size], RTEnvd.ClockIndexes[0:RTMeta.total_num_tables], RTEnvd.iTable[0:RTMeta.total_input_size], RTEnvd.oTable[0:RTMeta.total_output_size], RTEnvd.accurate_count[0:RTMeta.num_threads], RTEnvd.approx_count[0:RTMeta.num_threads], RTEnvd.TableRP[0:1])
       #else
-#pragma omp target exit data map(delete:RTEnvd, RTEnvd.threshold[0:1], RTEnvd.tabNumEntries[0:1], RTEnvd.inputIdx[0:RTMeta.total_num_tables], RTEnvd.ReplacementData[0:RTMeta.replacement_data_size], RTEnvd.ClockIndexes[0:RTMeta.total_num_tables], RTEnvd.iTable[0:RTMeta.total_input_size], RTEnvd.oTable[0:RTMeta.total_output_size])
+#pragma omp target exit data map(delete:RTEnvd, RTEnvd.threshold[0:1], RTEnvd.tabNumEntries[0:1], RTEnvd.inputIdx[0:RTMeta.total_num_tables], RTEnvd.ReplacementData[0:RTMeta.replacement_data_size], RTEnvd.ClockIndexes[0:RTMeta.total_num_tables], RTEnvd.iTable[0:RTMeta.total_input_size], RTEnvd.oTable[0:RTMeta.total_output_size], RTEnvd.TableRP[0:1])
       #endif //APPROX_DEV_STATS
     }
   int total_num_tables = num_blocks * ((threads_per_block/NTHREADS_PER_WARP)*TABLES_PER_WARP);
@@ -173,11 +180,11 @@ void resetDeviceTable(float thresh, int threads_per_block, int num_blocks, int n
   int total_output_size = total_num_table_entries * num_output_items_per_entry;
   int replacement_data_size = total_num_tables * (1+std::max(1, num_tab_entries/8));
   int clock_data_size = total_num_tables;
-  RTEnvd.resetTable(threshold, total_input_size, total_output_size, total_num_tables, replacement_data_size, num_blocks, num_tab_entries, num_threads, RTMeta);
+  RTEnvd.resetTable(threshold, total_input_size, total_output_size, total_num_tables, replacement_data_size, num_blocks, num_tab_entries, num_threads, RTMeta, RP);
   #ifdef APPROX_DEV_STATS
-#pragma omp target enter data map(to:RTEnvd, RTEnvd.threshold[0:1], RTEnvd.tabNumEntries[0:1], RTEnvd.inputIdx[0:total_num_tables], RTEnvd.ReplacementData[0:replacement_data_size], RTEnvd.ClockIndexes[0:clock_data_size], RTEnvd.iTable[0:total_input_size], RTEnvd.oTable[0:total_output_size], RTEnvd.accurate_count[0:num_threads], RTEnvd.approx_count[0:num_threads])
+#pragma omp target enter data map(to:RTEnvd, RTEnvd.threshold[0:1], RTEnvd.tabNumEntries[0:1], RTEnvd.inputIdx[0:total_num_tables], RTEnvd.ReplacementData[0:replacement_data_size], RTEnvd.ClockIndexes[0:clock_data_size], RTEnvd.iTable[0:total_input_size], RTEnvd.oTable[0:total_output_size], RTEnvd.accurate_count[0:num_threads], RTEnvd.approx_count[0:num_threads], RTEnvd.TableRP[0:1])
   #else
-#pragma omp target enter data map(to:RTEnvd, RTEnvd.threshold[0:1], RTEnvd.tabNumEntries[0:1], RTEnvd.inputIdx[0:total_num_tables], RTEnvd.ReplacementData[0:replacement_data_size], RTEnvd.ClockIndexes[0:clock_data_size], RTEnvd.iTable[0:total_input_size], RTEnvd.oTable[0:total_output_size])
+#pragma omp target enter data map(to:RTEnvd, RTEnvd.threshold[0:1], RTEnvd.tabNumEntries[0:1], RTEnvd.inputIdx[0:total_num_tables], RTEnvd.ReplacementData[0:replacement_data_size], RTEnvd.ClockIndexes[0:clock_data_size], RTEnvd.iTable[0:total_input_size], RTEnvd.oTable[0:total_output_size], RTEnvd.TableRP[0:1])
   #endif // APPROX_DEV_STATS
 }
 
@@ -279,6 +286,7 @@ public:
   int perfoStep;
   float perfoRate;
   float *randomNumbers;
+  TableReplacementPolicy RP = CLOCK;
   int count;
 
   ApproxRuntimeConfiguration() {
@@ -357,6 +365,17 @@ public:
       __approx_perfo_rate__ = perfoRate;
     }
 
+    env_p = std::getenv("REPLACEMENT_CLOCK");
+    if (env_p) {
+      RP = CLOCK;
+    }
+
+    env_p = std::getenv("REPLACEMENT_ROUND_ROBIN");
+    if (env_p) {
+      RP = ROUND_ROBIN;
+    }
+
+
  // This is not the optimal way. Since, we will 
  // always use the same random numbers.
     int numThreads = 32; //omp_get_max_threads();
@@ -372,9 +391,9 @@ public:
     #ifdef APPROX_DEV_STATS
     int nThreads = numBlocks*threadsPerBlock;
     printf("WARNING: HPAC will collect per-thread approximation statistics for %d threads, affecting runtime. For performance benchmarking, disable this feature\n", numThreads);
-    resetDeviceTable(threshold, threadsPerBlock, numBlocks, inputSize, outputSize, tableSize, numThreads);
+    resetDeviceTable(threshold, threadsPerBlock, numBlocks, inputSize, outputSize, tableSize, numThreads, RP);
     #else
-    resetDeviceTable(threshold, threadsPerBlock, numBlocks, inputSize, outputSize, tableSize, numBlocks*threadsPerBlock);
+    resetDeviceTable(threshold, threadsPerBlock, numBlocks, inputSize, outputSize, tableSize, numBlocks*threadsPerBlock, RP);
     #endif  //APPROX_DEV_STATS
 
   }
@@ -534,7 +553,7 @@ void __approx_device_memo(void (*accurateFN)(void *), void *arg, int memo_type, 
 
   MemoTable<real_t, SM_SZ_IN_BYTES, NTHREADS_PER_WARP, TABLES_PER_WARP> _ipt_table{*RTEnvd.tabNumEntries, ipt_table,
                                                                                    n_input_values, RTEnvd.inputIdx, RTEnvd.ClockIndexes,
-                                                                                   RTEnvd.ReplacementData
+                                                                                   RTEnvd.ReplacementData, RTEnvd.TableRP
   };
 
   syncThreadsAligned();

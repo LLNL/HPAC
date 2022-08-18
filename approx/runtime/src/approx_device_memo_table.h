@@ -8,6 +8,7 @@
 #include "device_intrinsics.h"
 
 #pragma omp begin declare target device_type(nohost)
+
 template<typename ValType, unsigned int SIZE_IN_BYTES,
   unsigned int THREADS_PER_WARP, unsigned int NUM_TABLES_PER_WARP>
 class MemoTable{
@@ -18,6 +19,7 @@ class MemoTable{
   ValType num_items_per_entry;
   int num_entries;
   int *clock_indexes;
+  TableReplacementPolicy RP;
 
 private:
   int calc_s_tab_size()
@@ -26,13 +28,14 @@ private:
     return ((int)(num_items_per_entry)*tables_per_block*(num_entries));
   }
     public:
-  MemoTable(int NumEntries, ValType *tab_ptr, ValType _num_items_per_entry, char *_InputIdx, int *_clock_indexes, unsigned char *_ReplacementData){
+  MemoTable(int NumEntries, ValType *tab_ptr, ValType _num_items_per_entry, char *_InputIdx, int *_clock_indexes, unsigned char *_ReplacementData, TableReplacementPolicy *_RP){
         num_entries = NumEntries;
         table = tab_ptr;
         num_items_per_entry = _num_items_per_entry;
         InputIdx = _InputIdx;
         clock_indexes = _clock_indexes;
         ReplacementData = _ReplacementData;
+        RP = *_RP;
     }
 
     ValType &operator()(int col)
@@ -83,21 +86,24 @@ private:
 
     void registerAccess(int entryIdx)
     {
-        int tid_in_block = omp_get_thread_num();
-        int tid_in_warp = tid_in_block % NTHREADS_PER_WARP;
-        int warp_in_block = tid_in_block / NTHREADS_PER_WARP;
-        int table_in_warp = tid_in_warp / (NTHREADS_PER_WARP/TABLES_PER_WARP);
-        int table_number = warp_in_block * TABLES_PER_WARP + table_in_warp;
-        int tables_per_block = (omp_get_num_threads()/NTHREADS_PER_WARP) * TABLES_PER_WARP;
+      if(RP == ROUND_ROBIN)
+        return;
 
-        // every table has at least 8 bits for access tracking
-        // unsigned int access_index = (table_number * std::max(1,num_entries/8)) + (entryIdx / 8);
-        unsigned int access_index = ((omp_get_team_num() * tables_per_block + table_number) * std::max(1,num_entries/8)) + (entryIdx/8);
-        unsigned char mask = 1 << (entryIdx % 8);
+      int tid_in_block = omp_get_thread_num();
+      int tid_in_warp = tid_in_block % NTHREADS_PER_WARP;
+      int warp_in_block = tid_in_block / NTHREADS_PER_WARP;
+      int table_in_warp = tid_in_warp / (NTHREADS_PER_WARP/TABLES_PER_WARP);
+      int table_number = warp_in_block * TABLES_PER_WARP + table_in_warp;
+      int tables_per_block = (omp_get_num_threads()/NTHREADS_PER_WARP) * TABLES_PER_WARP;
 
-        #pragma omp atomic update
-        ReplacementData[access_index] |= mask;
-        // update replacement data information in the table
+      // every table has at least 8 bits for access tracking
+      // unsigned int access_index = (table_number * std::max(1,num_entries/8)) + (entryIdx / 8);
+      unsigned int access_index = ((omp_get_team_num() * tables_per_block + table_number) * std::max(1,num_entries/8)) + (entryIdx/8);
+      unsigned char mask = 1 << (entryIdx % 8);
+
+      #pragma omp atomic update
+      ReplacementData[access_index] |= mask;
+      // update replacement data information in the table
     }
 
     int getSize()
@@ -152,6 +158,14 @@ private:
       int size = (int) InputIdx[tables_per_block * omp_get_team_num() + table_number];
       if(size < num_entries)
         return size;
+
+      if(RP == ROUND_ROBIN)
+        {
+          int access = tables_per_block * omp_get_team_num() + table_number;
+          int retval = ReplacementData[access];
+          ReplacementData[access] = (retval + 1) % num_entries;
+          return retval;
+        }
 
       int clockIndex = clock_indexes[tables_per_block * omp_get_team_num() + table_number];
       // base access index of our table's data
