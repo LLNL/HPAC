@@ -13,19 +13,18 @@
 
 #include <stdbool.h>
 #include <iostream>
+#include <omp.h>
+#include <utility>
 
-#ifdef __cplusplus
-extern "C" {
-#endif
-  void resetDeviceTable(float threshold = -1.0, size_t newiSize = -1, size_t newoSize = -1, int numTabEntries = -1, int numThreads = -1);
+void resetDeviceTable(float thresh = -1, int threads_per_block = -1, int num_blocks = -1, int num_input_items_per_entry = -1, int num_output_items_per_entry = -1, int num_tab_entries = -1, int num_threads = -1);
   void setHostThreshold(float newThresh);
 float getDeviceThreshold();
   int getNThreadsPerWarp();
   int getNTablesPerWarp();
   int calcBlockTableSizeInBytes(int threadsPerBlock, int entriesPerTable, int itemSize, int totalInputValuesPerInvocation);
+  bool areThreadStatisticsCaptured();
+  float getApproxRatioForThread(int threadNum);
+std::pair<int*, int*> getApproxRatioInformation();
 #ifdef APPROX_DEV_STATS
 void writeDeviceThreadStatistics(std::ostream& file);
-#endif
-#ifdef __cplusplus
-}
 #endif
