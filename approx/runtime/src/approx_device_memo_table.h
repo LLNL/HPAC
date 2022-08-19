@@ -78,7 +78,11 @@ private:
             int access_idx = (row_number * tables_per_block) + table_number;
             real_t in_val_conv = 0;
             convertToSingleWithOffset(&in_val_conv, in_var.ptr, 0, i*in_var.stride, (ApproxType) in_var.data_type);
-            real_t dist = fabs(table[access_idx] - in_val_conv);
+            real_t dist = 0;
+            if(table[access_idx] != 0)
+              dist = fabs(table[access_idx] - in_val_conv) / table[access_idx];
+            else
+              dist = fabs(table[access_idx] - in_val_conv);
             dist_total += dist;
         }
         return dist_total;
