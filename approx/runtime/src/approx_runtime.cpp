@@ -85,7 +85,7 @@ public:
   ApproxRuntimeDevDataEnv() = default;
 
 #pragma omp end declare target
-  void resetTable(float _threshold, int total_input_size, int total_output_size, int total_num_tables, int replacement_data_size, int num_blocks, int _numTableEntries, int _nthreads, ApproxRuntimeDevMetadata& RTMeta, TableReplacementPolicy RP = CLOCK){
+  void resetTable(float _threshold, int total_input_size, int total_output_size, int total_num_tables, int replacement_data_size, int num_blocks, int _numTableEntries, int _nthreads, ApproxRuntimeDevMetadata& RTMeta, TableReplacementPolicy RP){
     // we want to have at least one 8-bit integer per table
     destruct();
     RTMeta.total_input_size = total_input_size;
@@ -151,6 +151,7 @@ ApproxRuntimeDevMetadata RTMeta = ApproxRuntimeDevMetadata();
 void resetDeviceTable(float thresh, int threads_per_block, int num_blocks, int num_input_items_per_entry, int num_output_items_per_entry, int num_tab_entries, int num_threads, TableReplacementPolicy RP){
   float threshold = thresh == -1.0 ? *RTEnvd.threshold : thresh;
   int numTabEntries = num_tab_entries == -1 ? *RTEnvd.tabNumEntries : num_tab_entries;
+  RP = RP == DEFAULT ? RTMeta.RP : RP;
   if(num_threads == -1)
     {
   #ifdef APPROX_DEV_STATS

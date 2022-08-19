@@ -18,7 +18,7 @@
 #include <utility>
 #include "approx.h"
 
-void resetDeviceTable(float thresh = -1, int threads_per_block = -1, int num_blocks = -1, int num_input_items_per_entry = -1, int num_output_items_per_entry = -1, int num_tab_entries = -1, int num_threads = -1, TableReplacementPolicy RP = CLOCK);
+void resetDeviceTable(float thresh = -1, int threads_per_block = -1, int num_blocks = -1, int num_input_items_per_entry = -1, int num_output_items_per_entry = -1, int num_tab_entries = -1, int num_threads = -1, TableReplacementPolicy RP = DEFAULT);
   void setHostThreshold(float newThresh);
 float getDeviceThreshold();
   int getNThreadsPerWarp();

@@ -19,6 +19,7 @@
 extern "C" {
 #endif
 enum TableReplacementPolicy : unsigned char{
+  DEFAULT,
   CLOCK,
   ROUND_ROBIN
 };
