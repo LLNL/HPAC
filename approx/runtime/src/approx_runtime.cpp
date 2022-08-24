@@ -391,8 +391,8 @@ public:
 
     #ifdef APPROX_DEV_STATS
     int nThreads = numBlocks*threadsPerBlock;
-    printf("WARNING: HPAC will collect per-thread approximation statistics for %d threads, affecting runtime. For performance benchmarking, disable this feature\n", numThreads);
-    resetDeviceTable(threshold, threadsPerBlock, numBlocks, inputSize, outputSize, tableSize, numThreads, RP);
+    printf("WARNING: HPAC will collect per-thread approximation statistics for %d threads, affecting runtime. For performance benchmarking, disable this feature\n", nThreads);
+    resetDeviceTable(threshold, threadsPerBlock, numBlocks, inputSize, outputSize, tableSize, nThreads, RP);
     #else
     resetDeviceTable(threshold, threadsPerBlock, numBlocks, inputSize, outputSize, tableSize, numBlocks*threadsPerBlock, RP);
     #endif  //APPROX_DEV_STATS
