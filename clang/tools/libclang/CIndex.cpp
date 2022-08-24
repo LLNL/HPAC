@@ -6707,6 +6707,7 @@ CXCursor clang_getCursorDefinition(CXCursor C) {
   case Decl::Block:
   case Decl::Captured:
   case Decl::OMPCapturedExpr:
+  case Decl::ApproxCapturedExpr:
   case Decl::Label: // FIXME: Is this right??
   case Decl::ClassScopeFunctionSpecialization:
   case Decl::CXXDeductionGuide:
