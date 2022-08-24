@@ -1985,7 +1985,7 @@ Parser::ParsePostfixExpressionSuffix(ExprResult LHS) {
         if ((inApproxScope || (getLangOpts().OpenMP >= 50 &&
             (OMPClauseKind == llvm::omp::Clause::OMPC_to ||
              OMPClauseKind == llvm::omp::Clause::OMPC_from))) &&
-             Tok.is(tok::colon))) {
+             Tok.is(tok::colon)) {
           // Consume ':'
           ColonLocSecond = ConsumeToken();
           if (Tok.isNot(tok::r_square)) {
