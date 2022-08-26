@@ -41,6 +41,7 @@ typedef struct approx_perfo_info_t {
   float rate;
 } approx_perfo_info_t;
 
+#pragma omp declare target
 /** @struct approx_var_info_t
  *  @brief This structure contains all the information the
  *  developer passed to the programming model on the in/out/inout()
@@ -65,7 +66,19 @@ typedef struct approx_var_info_t {
   uint8_t dir;
 } approx_var_info_t;
 
-#pragma omp declare target
+typedef struct approx_v_info_t {
+  void *ptr;
+  size_t num_elem;
+} approx_v_info_t;
+
+
+typedef struct region_specification {
+  const size_t sz_elem;
+  const size_t stride;
+  const int8_t data_type;
+  const int8_t dir;
+} region_specification;
+
 enum ApproxType : int8_t {
 #define APPROX_TYPE(Id, type, nameOfType) Id,
 #include "clang/Basic/approxTypes.def"
