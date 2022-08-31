@@ -24,7 +24,7 @@ using namespace llvm;
 using namespace clang;
 using namespace CodeGen;
 
-int8_t convertToApproxType(const BuiltinType *T) {
+static int8_t convertToApproxType(const BuiltinType *T) {
   ApproxType approxType;
   switch (T->getKind()) {
   case BuiltinType::Kind::Bool:
