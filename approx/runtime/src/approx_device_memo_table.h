@@ -61,7 +61,7 @@ private:
         }
     }
 
-  ValType calc_distance(region_specification &rs, void *input, int size, int entry, int offset)
+  ValType calc_distance(approx_region_specification &rs, void *input, int size, int entry, int offset)
     {
         int tid_in_block = omp_get_thread_num();
         int tid_in_warp = tid_in_block % NTHREADS_PER_WARP;
@@ -208,14 +208,14 @@ private:
   }
 
 
-  void add_entry(region_specification *rs, void **inputs, int *sizes, int nInputs)
+  void add_entry(approx_region_specification *rs, approx_var_ptr_t *inputs, int nInputs)
   {
     int idx_offset = 0;
     int offset = 0;
     int entry_index = getInsertionIdx();
     for(int j = 0; j < nInputs; j++)
       {
-        for(int i = 0; i < sizes[i]; i++)
+        for(int i = 0; i < rs[j].num_elem; i++)
           {
             int tid_in_block = omp_get_thread_num();
             int tid_in_warp = tid_in_block % NTHREADS_PER_WARP;
@@ -231,12 +231,12 @@ private:
             row_number = entry_index * num_items_per_entry + offset + i;
             access_idx = (row_number * tables_per_block) + table_number;
 
-            convertToSingleWithOffset(table, inputs[j], access_idx, i*rs[j].stride,
+            convertToSingleWithOffset(table, inputs[j].ptr, access_idx, i*rs[j].stride,
                                       (ApproxType) rs[j].data_type);
 
             idx_offset = tables_per_block * omp_get_team_num() + table_number;
           }
-        offset += sizes[j];
+        offset += rs[j].num_elem;
       }
 
     InputIdx[idx_offset] = std::min(num_entries, InputIdx[idx_offset]+1);
