@@ -536,12 +536,12 @@ void __approx_device_memo(void (*accurateFN)(void *), void *arg, int memo_type, 
   // FIXME: assume inputs are the same size
   for(int i = 0; i < nInputs; i++)
     {
-      i_tab_offset += in_reg[i].num_elem;
+      i_tab_offset += ipts[i].num_elem;
     }
 
   for(int i = 0; i < nOutputs; i++)
     {
-      n_output_values += out_reg[i].num_elem;
+      n_output_values += opts[i].num_elem;
     }
 
   n_input_values = i_tab_offset;
@@ -573,8 +573,8 @@ void __approx_device_memo(void (*accurateFN)(void *), void *arg, int memo_type, 
       offset = 0;
       for(int j = 0; j < nInputs; j++)
         {
-          dist_total += _ipt_table.calc_distance(in_reg[j], ipts[j].ptr, in_reg[j].num_elem, k, offset);
-          offset += in_reg[j].num_elem;
+          dist_total += _ipt_table.calc_distance(in_reg[j], ipts[j], ipts[j].num_elem, k, offset);
+          offset += ipts[j].num_elem;
         }
 
       dist_total /= n_input_values;
@@ -611,7 +611,7 @@ void __approx_device_memo(void (*accurateFN)(void *), void *arg, int memo_type, 
       offset = 0;
       for(int j = 0; j < nOutputs; j++)
         {
-          for(int i = 0; i < out_reg[j].num_elem; i++)
+          for(int i = 0; i < opts[j].num_elem; i++)
             {
               int tid_in_block = omp_get_thread_num();
               int tid_in_warp = tid_in_block % NTHREADS_PER_WARP;
@@ -631,7 +631,7 @@ void __approx_device_memo(void (*accurateFN)(void *), void *arg, int memo_type, 
                                           (ApproxType) out_reg[j].data_type
                                           );
             }
-          offset += out_reg[j].num_elem;
+          offset += opts[j].num_elem;
         }
 
       #ifdef APPROX_DEV_STATS
@@ -663,7 +663,7 @@ void __approx_device_memo(void (*accurateFN)(void *), void *arg, int memo_type, 
         {
       for(int j = 0; j < nOutputs; j++)
         {
-          for(size_t i = 0; i < out_reg[j].num_elem; i++)
+          for(size_t i = 0; i < opts[j].num_elem; i++)
             {
               int tid_in_block = omp_get_thread_num();
               int tid_in_warp = tid_in_block % NTHREADS_PER_WARP;
@@ -682,7 +682,7 @@ void __approx_device_memo(void (*accurateFN)(void *), void *arg, int memo_type, 
                                         (ApproxType) out_reg[j].data_type);
 
             }
-          offset += out_reg[j].num_elem;
+          offset += opts[j].num_elem;
         }
       }
     }
