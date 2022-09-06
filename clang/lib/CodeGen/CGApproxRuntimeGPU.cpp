@@ -19,6 +19,7 @@
 #include "clang/Basic/Approx.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/Support/Debug.h"
+#include <tuple>
 
 using namespace llvm;
 using namespace clang;
@@ -190,18 +191,18 @@ static FieldDecl *addFieldToRecordDecl(ASTContext &C, DeclContext *DC,
   return Field;
 }
 
-void CGApproxRuntimeGPU::getVarInfoType(ASTContext &C, QualType &VarInfoTy) {
-  if (VarInfoTy.isNull()) {
+void CGApproxRuntimeGPU::getVarInfoType(ASTContext &C, QualType &VarRegionTy) {
+  if (VarRegionTy.isNull()) {
     RecordDecl *VarInfoRD = C.buildImplicitRecord("approx_region_specification");
     VarInfoRD->startDefinition();
     QualType SizeOfType = C.getSizeType();
     SizeOfType = C.getCanonicalType(SizeOfType).withConst();
     // sizeof(type)
     addFieldToRecordDecl(C, VarInfoRD, SizeOfType);
-    /// number of elements
-    addFieldToRecordDecl(C, VarInfoRD, SizeOfType);
-    /// stride of access
-    addFieldToRecordDecl(C, VarInfoRD, SizeOfType);
+    // /// number of elements
+    // addFieldToRecordDecl(C, VarInfoRD, SizeOfType);
+    // /// stride of access
+    // addFieldToRecordDecl(C, VarInfoRD, SizeOfType);
     /// Data Type can be negative.
     /// The bitwidth will depend on the way we support
     /// user types/ primary types. Keep it 8 atm.
@@ -209,7 +210,7 @@ void CGApproxRuntimeGPU::getVarInfoType(ASTContext &C, QualType &VarInfoTy) {
     /// The directionality of this region in/out/inout
     addFieldToRecordDecl(C, VarInfoRD, C.getIntTypeForBitwidth(8, false).withConst());
     VarInfoRD->completeDefinition();
-    VarInfoTy = C.getRecordType(VarInfoRD);
+    VarRegionTy = C.getRecordType(VarInfoRD);
   }
   return;
 }
@@ -217,11 +218,20 @@ void CGApproxRuntimeGPU::getVarInfoType(ASTContext &C, QualType &VarInfoTy) {
 void CGApproxRuntimeGPU::getVarPtrType(ASTContext &C, QualType &VarInfoTy) {
   if (VarInfoTy.isNull()) {
     RecordDecl *VarPtrRD = C.buildImplicitRecord("approx_var_ptr_t");
+    QualType SizeOfType = C.getSizeType();
+    SizeOfType = C.getCanonicalType(SizeOfType).withConst();
     VarPtrRD->startDefinition();
+
+
     /// Void pointer pointing to data values
     addFieldToRecordDecl(C, VarPtrRD, C.getIntPtrType());
+
+    // /// number of elements
+    addFieldToRecordDecl(C, VarPtrRD, SizeOfType);
+    // /// stride of access
+    addFieldToRecordDecl(C, VarPtrRD, SizeOfType);
     VarPtrRD->completeDefinition();
-    VarPtrTy = C.getRecordType(VarInfoRD);
+    VarInfoTy = C.getRecordType(VarPtrRD);
   }
   return;
 }
@@ -247,7 +257,7 @@ CGApproxRuntimeGPU::CGApproxRuntimeGPU(CodeGenModule &CGM)
                                          false);
 }
 
-CGApproxRuntimeGPU::~CGApproxRuntimeGPU(){ delete RegionInfo };
+// CGApproxRuntimeGPU::~CGApproxRuntimeGPU(){ delete RegionInfo };
 void CGApproxRuntimeGPU::CGApproxRuntimeEnterRegion(CodeGenFunction &CGF,
                                                  CapturedStmt &CS) {
   // This two values (requiresInputs, requiredData) should be false.
@@ -262,7 +272,7 @@ void CGApproxRuntimeGPU::CGApproxRuntimeEnterRegion(CodeGenFunction &CGF,
       llvm::PointerType::getUnqual(Types.ConvertType(C.CharTy));
   /// Reset All info of the Runtime "state machine"
   getVarInfoType(C, VarRegionSpecTy);
-  getVarInfoType(C, VarPtrTy);
+  getVarPtrType(C, VarPtrTy);
   Inputs.clear();
   Outputs.clear();
   for (unsigned i = DEV_ARG_START; i < DEV_ARG_END; i++)
@@ -327,41 +337,33 @@ void CGApproxRuntimeGPU::CGApproxRuntimeExitRegion(CodeGenFunction &CGF) {
   CGF.EmitRuntimeCall(RTFnCallee, ArrayRef<llvm::Value *>(approxRTParams));
 }
 
-std::pair<llvm::Value *, llvm::Value *>
+std::tuple<llvm::Value *, llvm::Value *, llvm::Value*>
 CGApproxRuntimeGPU::CGApproxRuntimeEmitData(
     CodeGenFunction &CGF,
     llvm::SmallVector<std::pair<Expr *, Directionality>, 16> &Data,
-    const char *arrayName) {
+    const char *infoName, const char *ptrName) {
   int numVars = Data.size();
   ASTContext &C = CGM.getContext();
-  QualType VarSpecArrayTy;
   QualType VarPtrArrayTy;
   llvm::Value *NumOfElements =
       llvm::ConstantInt::get(CGM.Int32Ty, numVars, false);
 
-  // this should be just one
-  VarSpecArrayTy = C.getConstantArrayType(VarRegionSpecTy, llvm::APInt(64, numVars),
-                                         nullptr, ArrayType::Normal, 0);
-  VarPtrArrayTy = C.getConstantArrayType(VarPtTry, llvm::APInt(64, numVars),
+  VarPtrArrayTy = C.getConstantArrayType(VarPtrTy, llvm::APInt(64, numVars),
                                          nullptr, ArrayType::Normal, 0);
 
-  std::vector<llvm::SmallVector<llvm::Constant*,5>> RegionSpecInit;
-  // Address VarRegionArray = CGF.CreateMemTemp(VarSpecArrayTy, arrayName);
-  // VarRegionArray = CGF.Builder.CreateConstArrayGEP(VarRegionArray, 0);
-  // TODO: these have the same name
-  Address VarPtrArray = CGF.CreateMemTemp(VarPtrArrayTy, arrayName);
+  std::vector<llvm::SmallVector<llvm::Constant*,3>> RegionSpecInit;
+
+  Address VarPtrArray = CGF.CreateMemTemp(VarPtrArrayTy, ptrName);
   VarPtrArray = CGF.Builder.CreateConstArrayGEP(VarPtrArray, 0);
-  // Address VarPtrArray = CGF.Builder.CreateConstArrayGep(VarPtrArray, 0);
 
   const auto *VarInfoRecord = VarRegionSpecTy->getAsRecordDecl();
   const auto *VarPtrRecord = VarPtrTy->getAsRecordDecl();
   unsigned Pos = 0;
-  enum VarRegionFieldID { SZ_ELEM, NUM_ELEM, STRIDE, DATA_TYPE, DIR };
-  enum VarPtrFieldID { PTR };
+  enum VarPtrFieldID { PTR, NUM_ELEM, STRIDE };
 
   for (auto P : Data) {
 
-    llvm::SmallVector<llvm::Constant*> SpecInit;
+    llvm::SmallVector<llvm::Constant*, 3> SpecInit;
     llvm::Value *Addr;
     llvm::Value *NumElements;
     llvm::Value *TypeOfElement;
@@ -380,78 +382,82 @@ CGApproxRuntimeGPU::CGApproxRuntimeEmitData(
                           BaseAddrLVal);
 
     // Store NUM_ELEMENTS
-    SpecInit.push_back(llvm::ConstantInt::get(CGF.Int64Ty, NumElements, false) );
-    // LValue nElemLVal = CGF.EmitLValueForField(
-    //     Base, *std::next(VarPtrRecord->field_begin(), NUM_ELEM));
-    // CGF.EmitStoreOfScalar(NumElements, nElemLVal);
+    LValue nElemLVal = CGF.EmitLValueForField(
+        Base, *std::next(VarPtrRecord->field_begin(), NUM_ELEM));
+    CGF.EmitStoreOfScalar(NumElements, nElemLVal);
 
     // Store SZ_ELEM
-    SpecInit.push_back(llvm::ConstantInt::get(CGF.Int64Ty, SizeOfElement, false) );
-    // LValue sElemLVal = CGF.EmitLValueForField(
-    //     Base, *std::next(VarInfoRecord->field_begin(), SZ_ELEM));
-    // CGF.EmitStoreOfScalar(SizeOfElement, sElemLVal);
+    SpecInit.push_back(static_cast<llvm::Constant*>(SizeOfElement));
 
     // Store STRIDE
-    // LValue strideElemLVal = CGF.EmitLValueForField(
-    //     Base, *std::next(VarInfoRecord->field_begin(), STRIDE));
-    // CGF.EmitStoreOfScalar(AccessStride, strideElemLVal);
-    SpecInit.push_back(llvm::ConstantInt::get(CGF.Int64Ty, AccessStride, false) );
+    LValue strideElemLVal = CGF.EmitLValueForField(
+        Base, *std::next(VarPtrRecord->field_begin(), STRIDE));
+    CGF.EmitStoreOfScalar(AccessStride, strideElemLVal);
 
     // Store DATA_TYPE
-    SpecInit.push_back(llvm::ConstantInt::get(CGF.Int8ty, TypeOfElement, false) );
-    // LValue typeLVal = CGF.EmitLValueForField(
-    //     Base, *std::next(VarInfoRecord->field_begin(), DATA_TYPE));
-    // CGF.EmitStoreOfScalar(TypeOfElement, typeLVal);
+    SpecInit.push_back(static_cast<llvm::Constant*>(TypeOfElement));
 
     // Store Dir
-    SpecInit.push_back(llvm::ConstantInt::get(CGF.Int8ty, Dir, false) );
-    // Value *direction = llvm::ConstantInt::get(CGM.Int8Ty, Dir, false);
-    // LValue DirLVal = CGF.EmitLValueForField(
-    //     Base, *std::next(VarInfoRecord->field_begin(), DIR));
-    // CGF.EmitStoreOfScalar(direction, DirLVal);
+    SpecInit.push_back(llvm::ConstantInt::get(CGF.Int8Ty, Dir, false) );
 
     RegionSpecInit.push_back(SpecInit);
     Pos++;
   }
 
-  llvm::StructType *VarSpecStructType;
+  llvm::SmallVector<llvm::Type*, 3> STTypes{CGF.SizeTy, CGF.Int8Ty, CGF.Int8Ty};
+  llvm::StructType *VarSpecStructType = llvm::StructType::get(CGM.getLLVMContext(),
+                                                              STTypes);
+  VarSpecStructType->setName("approx_region_specification");
+  llvm::ArrayType *SpecStructArrTy = llvm::ArrayType::get(VarSpecStructType, numVars);
   std::vector<llvm::Constant *> InitStructs;
   // Create each struct individually
   for(auto S : RegionSpecInit) {
-    // InitStructs.push_back(new llvm::GlobalVariable());
+
+    InitStructs.push_back(llvm::ConstantStruct::get(VarSpecStructType, S));
   }
+  llvm::Constant *InitArray = llvm::ConstantArray::get(SpecStructArrTy, InitStructs);
 
-  // RegionInfo = new GlobalVariable(CGF.getModule(), VarSpecArrayTy, true, GlobalValue::ExternalLinkage,
-  //                                 InitStructs?,
-  //                                 infoName
-  //                                 );
+  // Leak, but who cares
+  RegionInfo = new GlobalVariable(CGM.getModule(), SpecStructArrTy, true, GlobalValue::InternalLinkage,
+                                  InitArray,
+                                  infoName
+                                  );
 
-  return std::make_pair(NumOfElements,
-                        CGF.Builder.CreatePointerBitCastOrAddrSpaceCast(
-                            VarInfoArray.getPointer(), CGF.VoidPtrTy));
+  // todo: address space cast for info type
+  return std::make_tuple(NumOfElements,
+                         CGF.Builder.CreatePointerBitCastOrAddrSpaceCast(
+                         RegionInfo, CGF.VoidPtrTy),
+                         CGF.Builder.CreatePointerBitCastOrAddrSpaceCast(
+                         VarPtrArray.getPointer(), CGF.VoidPtrTy)
+                         );
 }
 
 void CGApproxRuntimeGPU::CGApproxRuntimeEmitDataValues(CodeGenFunction &CGF) {
   /// No Dependencies so exit.
   static int input_arrays = 0;
   static int output_arrays = 0;
-  char name[100];
+  char nameInfo[100];
+  char namePtr[100];
   if (!requiresData)
     return;
 
-  llvm::Value *NumOfElements, *ArrayAddress;
+  llvm::Value *NumOfElements, *InfoAddress, *PtrAddress;
   if (requiresInputs && Inputs.size() > 0) {
-    sprintf(name, ".dep.approx_inputs.arr.addr_%d", input_arrays++);
-    std::tie(NumOfElements, ArrayAddress) =
-        CGApproxRuntimeEmitData(CGF, Inputs, name);
-    approxRTParams[DevDataDescIn] = ArrayAddress;
+    sprintf(nameInfo, ".dep.approx_inputs.arr.addr_%d", input_arrays);
+    sprintf(namePtr, ".dep.approx_ipt_ptrs.arr.addr_%d", input_arrays++);
+    std::tie(NumOfElements, InfoAddress, PtrAddress) =
+      CGApproxRuntimeEmitData(CGF, Inputs, nameInfo, namePtr);
+    approxRTParams[DevDataDescIn] = InfoAddress;
+    approxRTParams[DevDataPtrIn] = PtrAddress;
     approxRTParams[DevDataSizeIn] = NumOfElements;
   }
 
   // All approximation techniques require the output
-  sprintf(name, ".dep.approx_outputs.arr.addr_%d", output_arrays++);
-  std::tie(NumOfElements, ArrayAddress) =
-      CGApproxRuntimeEmitData(CGF, Outputs, name);
-  approxRTParams[DevDataDescOut] = ArrayAddress;
+  sprintf(nameInfo, ".dep.approx_outputs.arr.addr_%d", output_arrays);
+  sprintf(namePtr, ".dep.approx_opt_ptrs.arr.addr_%d", output_arrays++);
+  std::tie(NumOfElements, InfoAddress, PtrAddress) =
+    CGApproxRuntimeEmitData(CGF, Outputs, nameInfo, namePtr);
+  approxRTParams[DevDataDescOut] = InfoAddress;
+  approxRTParams[DevDataPtrOut] = PtrAddress;
   approxRTParams[DevDataSizeOut] = NumOfElements;
 }

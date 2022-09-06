@@ -156,11 +156,13 @@ private:
   llvm::GlobalVariable *RegionInfo;
 
 protected:
-  std::pair<llvm::Value *, llvm::Value *> CGApproxRuntimeEmitData(CodeGenFunction &CGF, llvm::SmallVector<std::pair<Expr *, Directionality>, 16> &Data, const char *arrayName) override;
-  virtual void getVarInfoType(ASTContext &C, QualType &VarInfoTy) override;
+  using CGApproxRuntime::CGApproxRuntimeEmitData;
+  std::tuple<llvm::Value *, llvm::Value *, llvm::Value *> CGApproxRuntimeEmitData(CodeGenFunction &CGF, llvm::SmallVector<std::pair<Expr *, Directionality>, 16> &Data, const char *infoName, const char *ptrName);
+  void getVarInfoType(ASTContext &C, QualType &VarInfoTy) override;
+  void getVarPtrType(ASTContext &C, QualType &VarInfoTy);
 public:
   CGApproxRuntimeGPU(CodeGenModule &CGM);
-  ~CGApproxRuntimeGPU();
+  ~CGApproxRuntimeGPU() = default;
   void CGApproxRuntimeEnterRegion(CodeGenFunction &CGF, CapturedStmt &CS) override;
   void CGApproxRuntimeEmitMemoInit(CodeGenFunction &CGF,
                                    ApproxMemoClause &MemoClause) override;
