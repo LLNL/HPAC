@@ -61,7 +61,7 @@ private:
         }
     }
 
-  ValType calc_distance(approx_region_specification &rs, approx_var_ptr_t &input, int size, int entry, int offset)
+  ValType calc_distance(const approx_region_specification &rs, const approx_var_ptr_t &input, int size, int entry, int offset)
     {
         int tid_in_block = omp_get_thread_num();
         int tid_in_warp = tid_in_block % NTHREADS_PER_WARP;
@@ -208,7 +208,7 @@ private:
   }
 
 
-  void add_entry(approx_region_specification *rs, approx_var_ptr_t *inputs, int nInputs)
+  void add_entry(const approx_region_specification *rs, const approx_var_ptr_t *inputs, int nInputs)
   {
     int idx_offset = 0;
     int offset = 0;

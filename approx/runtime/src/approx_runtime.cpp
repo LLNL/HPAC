@@ -521,10 +521,10 @@ unsigned int tnum_in_table_with_max_dist(float max_dist)
 }
 
 
-void __approx_device_memo(void (*accurateFN)(void *), void *arg, int memo_type, void *region_info_in, void *inputs, int nInputs, void *region_info_out, void *outputs, int nOutputs)
+void __approx_device_memo(void (*accurateFN)(void *), void *arg, int memo_type, const void *region_info_in, void *inputs, int nInputs, const void *region_info_out, void *outputs, int nOutputs)
 {
-  approx_region_specification *in_reg = (approx_region_specification*) region_info_in;
-  approx_region_specification *out_reg = (approx_region_specification*) region_info_out;
+  const approx_region_specification *in_reg = (const approx_region_specification*) region_info_in;
+  const approx_region_specification *out_reg = (const approx_region_specification*) region_info_out;
   approx_var_ptr_t *ipts = (approx_var_ptr_t*) inputs;
   approx_var_ptr_t *opts = (approx_var_ptr_t*) outputs;
   int tid_global = omp_get_thread_num() + omp_get_team_num() * omp_get_num_threads();
