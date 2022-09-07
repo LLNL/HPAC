@@ -248,9 +248,11 @@ CGApproxRuntimeGPU::CGApproxRuntimeGPU(CodeGenModule &CGM)
                                            /* Orig. fn ptr*/ llvm::PointerType::getUnqual(CallbackFnTy),
                                            /* Captured data ptr*/ CGM.VoidPtrTy,
                                            /* Memoization Type */ CGM.Int32Ty,
-                                           /* Region Info Desc. */ CGM.VoidPtrTy,
+                                           /* Input Data Descr. */ CGM.VoidPtrTy,
                                            /* Input Data Pointers. */ CGM.VoidPtrTy,
                                            /* Input Data Num Elements */ CGM.Int32Ty,
+                                           /* Output Data Descr. */ CGM.VoidPtrTy,
+                                           /* Output Data Pointers. */ CGM.VoidPtrTy,
                                            /* Output Data Num Elements */ CGM.Int32Ty
                                          },
                                          false);
@@ -291,9 +293,9 @@ void CGApproxRuntimeGPU::CGApproxRuntimeEnterRegion(CodeGenFunction &CGF,
   approxRTParams[DevCapDataPtr] =
       CGF.Builder.CreatePointerCast(CapStructAddr.getPointer(), CGM.VoidPtrTy);
   approxRTParams[DevDataDescIn] = llvm::ConstantPointerNull::get(CGM.VoidPtrTy);
-  approxRTParams[DevDataPtrIn] = llvm::ConstantPointerNull::get(CGM.VoidPtrTy);
   approxRTParams[DevDataSizeIn] =
       llvm::ConstantInt::get(CGF.Builder.getInt32Ty(), 0);
+  approxRTParams[DevDataDescOut] = llvm::ConstantPointerNull::get(CGM.VoidPtrTy);
   approxRTParams[DevDataSizeOut] =
       llvm::ConstantInt::get(CGF.Builder.getInt32Ty(), 0);
   approxRTParams[DevMemoDescr] =
@@ -336,20 +338,16 @@ void CGApproxRuntimeGPU::CGApproxRuntimeExitRegion(CodeGenFunction &CGF) {
   CGF.EmitRuntimeCall(RTFnCallee, ArrayRef<llvm::Value *>(approxRTParams));
 }
 
-std::tuple<llvm::Value *, llvm::Value *, llvm::Value *, llvm::Value*>
+std::tuple<llvm::Value *, llvm::Value *, llvm::Value*>
 CGApproxRuntimeGPU::CGApproxRuntimeEmitData(
     CodeGenFunction &CGF,
     llvm::SmallVector<std::pair<Expr *, Directionality>, 16> &Data,
-    int numInputs, int numOutputs,
     const char *infoName, const char *ptrName) {
   int numVars = Data.size();
   ASTContext &C = CGM.getContext();
   QualType VarPtrArrayTy;
-  llvm::Value *NumInputs =
-      llvm::ConstantInt::get(CGM.Int32Ty, numInputs, false);
-  llvm::Value *NumOutputs =
-      llvm::ConstantInt::get(CGM.Int32Ty, numOutputs, false);
-
+  llvm::Value *NumOfElements =
+      llvm::ConstantInt::get(CGM.Int32Ty, numVars, false);
 
   VarPtrArrayTy = C.getConstantArrayType(VarPtrTy, llvm::APInt(64, numVars),
                                          nullptr, ArrayType::Normal, 0);
@@ -431,7 +429,7 @@ CGApproxRuntimeGPU::CGApproxRuntimeEmitData(
                                   );
 
   // todo: address space cast for info type
-  return std::make_tuple(NumInputs, NumOutputs,
+  return std::make_tuple(NumOfElements,
                          CGF.Builder.CreatePointerBitCastOrAddrSpaceCast(
                          RegionInfo, CGF.VoidPtrTy),
                          CGF.Builder.CreatePointerBitCastOrAddrSpaceCast(
@@ -448,28 +446,23 @@ void CGApproxRuntimeGPU::CGApproxRuntimeEmitDataValues(CodeGenFunction &CGF) {
   if (!requiresData)
     return;
 
-  int numInputs = Inputs.size();
-  int numOutputs = Outputs.size();
-  assert(numInputs+numOutputs <= 16);
-  llvm::SmallVector<std::pair<Expr *, Directionality>, 16> Data;
-  Data.insert(Data.end(), Inputs.begin(), Inputs.end());
-  Data.insert(Data.end(), Outputs.begin(), Outputs.end());
-  llvm::Value *NumInputs, *NumOutputs, *InfoAddress, *PtrAddress;
-  sprintf(nameInfo, ".dep.approx.arr.addr_%d", input_arrays);
-  sprintf(namePtr, ".dep.approx_ptrs.arr.addr_%d", input_arrays++);
-  std::tie(NumInputs, NumOutputs, InfoAddress, PtrAddress) =
-    CGApproxRuntimeEmitData(CGF, Data, numInputs, numOutputs, nameInfo, namePtr);
-  approxRTParams[DevDataDescIn] = InfoAddress;
-  approxRTParams[DevDataPtrIn] = PtrAddress;
-  approxRTParams[DevDataSizeIn] = NumInputs;
-  approxRTParams[DevDataSizeOut] = NumOutputs;
+  llvm::Value *NumOfElements, *InfoAddress, *PtrAddress;
+  if (requiresInputs && Inputs.size() > 0) {
+    sprintf(nameInfo, ".dep.approx_inputs.arr.addr_%d", input_arrays);
+    sprintf(namePtr, ".dep.approx_ipt_ptrs.arr.addr_%d", input_arrays++);
+    std::tie(NumOfElements, InfoAddress, PtrAddress) =
+      CGApproxRuntimeEmitData(CGF, Inputs, nameInfo, namePtr);
+    approxRTParams[DevDataDescIn] = InfoAddress;
+    approxRTParams[DevDataPtrIn] = PtrAddress;
+    approxRTParams[DevDataSizeIn] = NumOfElements;
+  }
 
   // All approximation techniques require the output
-  // sprintf(nameInfo, ".dep.approx_outputs.arr.addr_%d", output_arrays);
-  // sprintf(namePtr, ".dep.approx_opt_ptrs.arr.addr_%d", output_arrays++);
-  // std::tie(NumOfElements, InfoAddress, PtrAddress) =
-  //   CGApproxRuntimeEmitData(CGF, Outputs, nameInfo, namePtr);
-  // approxRTParams[DevDataDescOut] = InfoAddress;
-  // approxRTParams[DevDataPtrOut] = PtrAddress;
-  // approxRTParams[DevDataSizeOut] = NumOfElements;
+  sprintf(nameInfo, ".dep.approx_outputs.arr.addr_%d", output_arrays);
+  sprintf(namePtr, ".dep.approx_opt_ptrs.arr.addr_%d", output_arrays++);
+  std::tie(NumOfElements, InfoAddress, PtrAddress) =
+    CGApproxRuntimeEmitData(CGF, Outputs, nameInfo, namePtr);
+  approxRTParams[DevDataDescOut] = InfoAddress;
+  approxRTParams[DevDataPtrOut] = PtrAddress;
+  approxRTParams[DevDataSizeOut] = NumOfElements;
 }
