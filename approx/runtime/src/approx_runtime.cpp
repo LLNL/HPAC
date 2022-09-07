@@ -521,12 +521,10 @@ unsigned int tnum_in_table_with_max_dist(float max_dist)
 }
 
 
-void __approx_device_memo(void (*accurateFN)(void *), void *arg, int memo_type, const void *region_info_in, const void *inputs, int nInputs, const void *region_info_out, void *outputs, int nOutputs)
+void __approx_device_memo(void (*accurateFN)(void *), void *arg, int memo_type, const void *region_info, void *inputs, int nInputs, int nOutputs)
 {
-  const approx_region_specification *in_reg = (const approx_region_specification*) region_info_in;
-  const approx_region_specification *out_reg = (const approx_region_specification*) region_info_out;
-  const approx_var_ptr_t *ipts = (approx_var_ptr_t*) inputs;
-  approx_var_ptr_t *opts = (approx_var_ptr_t*) outputs;
+  const approx_region_specification *reg_info = (const approx_region_specification*) region_info;
+  approx_var_ptr_t *ipts = (approx_var_ptr_t*) inputs;
   int tid_global = omp_get_thread_num() + omp_get_team_num() * omp_get_num_threads();
   real_t n_input_values = 0.0;
   int entry_index = -1;
@@ -541,7 +539,7 @@ void __approx_device_memo(void (*accurateFN)(void *), void *arg, int memo_type, 
 
   for(int i = 0; i < nOutputs; i++)
     {
-      n_output_values += opts[i].num_elem;
+      n_output_values += ipts[i+nInputs].num_elem;
     }
 
   n_input_values = i_tab_offset;
@@ -573,7 +571,7 @@ void __approx_device_memo(void (*accurateFN)(void *), void *arg, int memo_type, 
       offset = 0;
       for(int j = 0; j < nInputs; j++)
         {
-          dist_total += _ipt_table.calc_distance(in_reg[j], ipts[j], ipts[j].num_elem, k, offset);
+          dist_total += _ipt_table.calc_distance(reg_info[j], ipts[j], ipts[j].num_elem, k, offset);
           offset += ipts[j].num_elem;
         }
 
@@ -611,7 +609,7 @@ void __approx_device_memo(void (*accurateFN)(void *), void *arg, int memo_type, 
       offset = 0;
       for(int j = 0; j < nOutputs; j++)
         {
-          for(int i = 0; i < opts[j].num_elem; i++)
+          for(int i = 0; i < ipts[j+nInputs].num_elem; i++)
             {
               int tid_in_block = omp_get_thread_num();
               int tid_in_warp = tid_in_block % NTHREADS_PER_WARP;
@@ -625,13 +623,13 @@ void __approx_device_memo(void (*accurateFN)(void *), void *arg, int memo_type, 
               int o_tab_size = (n_output_values*tables_per_block*(*RTEnvd.tabNumEntries));
               int gmem_start_o = o_tab_size * omp_get_team_num();
 
-              convertFromSingleWithOffset(opts[j].ptr,
+              convertFromSingleWithOffset(ipts[j+nInputs].ptr,
                                           RTEnvd.oTable,
                                           i, access_idx+gmem_start_o,
-                                          (ApproxType) out_reg[j].data_type
+                                          (ApproxType) reg_info[j+nInputs].data_type
                                           );
             }
-          offset += opts[j].num_elem;
+          offset += ipts[j+nInputs].num_elem;
         }
 
       #ifdef APPROX_DEV_STATS
@@ -644,7 +642,7 @@ void __approx_device_memo(void (*accurateFN)(void *), void *arg, int memo_type, 
       // NOTE: for correctness of inout, we have to copy the input before calling accurateFN
       if(have_max_dist)
         {
-          _ipt_table.add_entry(in_reg, ipts, nInputs);
+          _ipt_table.add_entry(reg_info, ipts, nInputs);
         }
 
       accurateFN(arg);
@@ -663,7 +661,7 @@ void __approx_device_memo(void (*accurateFN)(void *), void *arg, int memo_type, 
         {
       for(int j = 0; j < nOutputs; j++)
         {
-          for(size_t i = 0; i < opts[j].num_elem; i++)
+          for(size_t i = 0; i < ipts[j+nInputs].num_elem; i++)
             {
               int tid_in_block = omp_get_thread_num();
               int tid_in_warp = tid_in_block % NTHREADS_PER_WARP;
@@ -678,11 +676,11 @@ void __approx_device_memo(void (*accurateFN)(void *), void *arg, int memo_type, 
 
               int o_tab_size = (n_output_values*tables_per_block*(*RTEnvd.tabNumEntries));
               int gmem_start_o = o_tab_size * omp_get_team_num();
-              convertToSingleWithOffset(RTEnvd.oTable, opts[j].ptr, access_idx+gmem_start_o, i,
-                                        (ApproxType) out_reg[j].data_type);
+              convertToSingleWithOffset(RTEnvd.oTable, ipts[j+nInputs].ptr, access_idx+gmem_start_o, i,
+                                        (ApproxType) reg_info[j+nInputs].data_type);
 
             }
-          offset += opts[j].num_elem;
+          offset += ipts[j+nInputs].num_elem;
         }
       }
     }

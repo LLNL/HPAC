@@ -55,8 +55,6 @@ enum DevApproxRTArgsIndex : uint {
   DevDataDescIn,
   DevDataPtrIn,
   DevDataSizeIn,
-  DevDataDescOut,
-  DevDataPtrOut,
   DevDataSizeOut,
   DEV_ARG_END
 };
@@ -157,7 +155,7 @@ private:
 
 protected:
   using CGApproxRuntime::CGApproxRuntimeEmitData;
-  std::tuple<llvm::Value *, llvm::Value *, llvm::Value *> CGApproxRuntimeEmitData(CodeGenFunction &CGF, llvm::SmallVector<std::pair<Expr *, Directionality>, 16> &Data, const char *infoName, const char *ptrName);
+  std::tuple<llvm::Value *, llvm::Value *, llvm::Value *, llvm::Value *> CGApproxRuntimeEmitData(CodeGenFunction &CGF, llvm::SmallVector<std::pair<Expr *, Directionality>, 16> &Data, int numInputs, int numOutputs, const char *infoName, const char *ptrName);
   void getVarInfoType(ASTContext &C, QualType &VarInfoTy) override;
   void getVarPtrType(ASTContext &C, QualType &VarInfoTy);
 public:
