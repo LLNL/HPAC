@@ -17,6 +17,7 @@
 #include "clang/AST/Stmt.h"
 #include "clang/AST/StmtApprox.h"
 #include "clang/Basic/Approx.h"
+#include "clang/Basic/AddressSpaces.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/Support/Debug.h"
 #include <tuple>
@@ -420,7 +421,11 @@ CGApproxRuntimeGPU::CGApproxRuntimeEmitData(
   // Leak, but who cares
   RegionInfo = new GlobalVariable(CGM.getModule(), SpecStructArrTy, true, GlobalValue::InternalLinkage,
                                   InitArray,
-                                  infoName
+                                  infoName,
+                                  /*InsertBefore=*/ nullptr,
+                                  /*ThreadLocalMode=*/ GlobalValue::NotThreadLocal,
+                                  // how do we do this better?
+                                  Optional<unsigned>((unsigned) 4)
                                   );
 
   // todo: address space cast for info type
