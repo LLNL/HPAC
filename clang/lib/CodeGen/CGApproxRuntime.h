@@ -158,6 +158,19 @@ private:
 protected:
   using CGApproxRuntime::CGApproxRuntimeEmitData;
   std::tuple<llvm::Value *, llvm::Value *, llvm::Value *> CGApproxRuntimeEmitData(CodeGenFunction &CGF, llvm::SmallVector<std::pair<Expr *, Directionality>, 16> &Data, const char *infoName, const char *ptrName);
+void CGApproxRuntimeEmitInitData(
+  CodeGenFunction &CGF,
+  llvm::SmallVector<std::pair<Expr *, Directionality>, 16> &Data, Address Base);
+  std::pair<Address,Address> declarePtrArrays(CodeGenFunction &CGF,
+                         llvm::SmallVector<std::pair<Expr *, Directionality>, 16> &Data, const char *ptrName);
+
+std::tuple<llvm::Value *, llvm::Value*>
+CGApproxRuntimeGPUEmitData(
+    CodeGenFunction &CGF,
+    llvm::SmallVector<std::pair<Expr *, Directionality>, 16> &Data,
+    Address VarPtrArray, const char *infoName);
+
+
   void getVarInfoType(ASTContext &C, QualType &VarInfoTy) override;
   void getVarPtrType(ASTContext &C, QualType &VarInfoTy);
 public:

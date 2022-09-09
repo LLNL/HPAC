@@ -20,6 +20,7 @@
 #include "clang/Basic/AddressSpaces.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/Support/Debug.h"
+#include "CGOpenMPRuntime.h"
 #include <tuple>
 
 using namespace llvm;
@@ -85,6 +86,11 @@ static int8_t convertToApproxType(const BuiltinType *T) {
   return approxType;
 }
 
+static llvm::Value *getPointer(CodeGenFunction &CGF, const Expr *E)
+{
+  llvm::Value *Addr = CGF.EmitLValue(E).getPointer(CGF);
+  return Addr;
+}
 static std::tuple<llvm::Value *, llvm::Value *, llvm::Value *, llvm::Value *, llvm::Value *>
 getPointerAndSize(CodeGenFunction &CGF, const Expr *E) {
   // Address of first Element.
@@ -338,11 +344,39 @@ void CGApproxRuntimeGPU::CGApproxRuntimeExitRegion(CodeGenFunction &CGF) {
   CGF.EmitRuntimeCall(RTFnCallee, ArrayRef<llvm::Value *>(approxRTParams));
 }
 
-std::tuple<llvm::Value *, llvm::Value *, llvm::Value*>
-CGApproxRuntimeGPU::CGApproxRuntimeEmitData(
-    CodeGenFunction &CGF,
-    llvm::SmallVector<std::pair<Expr *, Directionality>, 16> &Data,
-    const char *infoName, const char *ptrName) {
+void CGApproxRuntimeGPU::CGApproxRuntimeEmitInitData(
+  CodeGenFunction &CGF,
+  llvm::SmallVector<std::pair<Expr *, Directionality>, 16> &Data, Address BasePtr) {
+
+  int numVars = Data.size();
+  ASTContext &C = CGM.getContext();
+
+  Address VarPtrArray = BasePtr;
+
+  const auto *VarPtrRecord = VarPtrTy->getAsRecordDecl();
+  unsigned Pos = 0;
+  enum VarPtrFieldID { PTR, NUM_ELEM, STRIDE };
+
+  for (auto P : Data) {
+    llvm::SmallVector<llvm::Constant*, 3> SpecInit;
+    llvm::Value *Addr;
+    Expr *E = P.first;
+    Directionality Dir = P.second;
+    Addr = getPointer(CGF, E);
+    // Store Addr
+    // this is probably wrong
+    LValue Base = CGF.MakeAddrLValue(
+        CGF.Builder.CreateConstGEP(VarPtrArray, Pos), VarPtrTy);
+    auto *FieldT = *std::next(VarPtrRecord->field_begin(), PTR);
+    LValue BaseAddrLVal = CGF.EmitLValueForField(Base, FieldT);
+    CGF.EmitStoreOfScalar(CGF.Builder.CreatePtrToInt(Addr, CGF.IntPtrTy),
+                          BaseAddrLVal);
+  }
+}
+
+std::pair<Address,Address> CGApproxRuntimeGPU::declarePtrArrays(CodeGenFunction &CGF,
+    llvm::SmallVector<std::pair<Expr *, Directionality>, 16> &Data, const char *ptrName) {
+
   int numVars = Data.size();
   ASTContext &C = CGM.getContext();
   QualType VarPtrArrayTy;
@@ -352,15 +386,27 @@ CGApproxRuntimeGPU::CGApproxRuntimeEmitData(
   VarPtrArrayTy = C.getConstantArrayType(VarPtrTy, llvm::APInt(64, numVars),
                                          nullptr, ArrayType::Normal, 0);
 
+  Address VarPtrArrayBase = CGF.CreateMemTemp(VarPtrArrayTy, ptrName);
+  Address VarPtrArrayGEP = CGF.Builder.CreateConstArrayGEP(VarPtrArray, 0);
+  return std::make_pair(VarPtrArrayBase, VarPtrArrayGEP);
+}
+
+std::tuple<llvm::Value *, llvm::Value*>
+CGApproxRuntimeGPU::CGApproxRuntimeGPUEmitData(
+    CodeGenFunction &CGF,
+    llvm::SmallVector<std::pair<Expr *, Directionality>, 16> &Data,
+    Address VarPtrArray, const char *infoName) {
+  int numVars = Data.size();
+  ASTContext &C = CGM.getContext();
+  llvm::Value *NumOfElements =
+      llvm::ConstantInt::get(CGM.Int32Ty, numVars, false);
+
   std::vector<llvm::SmallVector<llvm::Constant*,3>> RegionSpecInit;
-
-  Address VarPtrArray = CGF.CreateMemTemp(VarPtrArrayTy, ptrName);
-  VarPtrArray = CGF.Builder.CreateConstArrayGEP(VarPtrArray, 0);
-
   const auto *VarInfoRecord = VarRegionSpecTy->getAsRecordDecl();
   const auto *VarPtrRecord = VarPtrTy->getAsRecordDecl();
   unsigned Pos = 0;
   enum VarPtrFieldID { PTR, NUM_ELEM, STRIDE };
+
 
   for (auto P : Data) {
 
@@ -374,14 +420,8 @@ CGApproxRuntimeGPU::CGApproxRuntimeEmitData(
     Directionality Dir = P.second;
     std::tie(Addr, NumElements, SizeOfElement, AccessStride, TypeOfElement) =
         getPointerAndSize(CGF, E);
-    // Store Addr
     LValue Base = CGF.MakeAddrLValue(
         CGF.Builder.CreateConstGEP(VarPtrArray, Pos), VarPtrTy);
-    auto *FieldT = *std::next(VarPtrRecord->field_begin(), PTR);
-    LValue BaseAddrLVal = CGF.EmitLValueForField(Base, FieldT);
-    CGF.EmitStoreOfScalar(CGF.Builder.CreatePtrToInt(Addr, CGF.IntPtrTy),
-                          BaseAddrLVal);
-
     // Store NUM_ELEMENTS
     LValue nElemLVal = CGF.EmitLValueForField(
         Base, *std::next(VarPtrRecord->field_begin(), NUM_ELEM));
@@ -431,9 +471,7 @@ CGApproxRuntimeGPU::CGApproxRuntimeEmitData(
   // todo: address space cast for info type
   return std::make_tuple(NumOfElements,
                          CGF.Builder.CreatePointerBitCastOrAddrSpaceCast(
-                         RegionInfo, CGF.VoidPtrTy),
-                         CGF.Builder.CreatePointerBitCastOrAddrSpaceCast(
-                         VarPtrArray.getPointer(), CGF.VoidPtrTy)
+                         RegionInfo, CGF.VoidPtrTy)
                          );
 }
 
@@ -446,23 +484,65 @@ void CGApproxRuntimeGPU::CGApproxRuntimeEmitDataValues(CodeGenFunction &CGF) {
   if (!requiresData)
     return;
 
+
+  ASTContext &C = CGM.getContext();
+  QualType BoolTy = C.getIntTypeForBitwidth(8, false);
+  // any way to have actual bool?
+  Address InitCheck = CGM.getOpenMPRuntime().ApproxInitCheck;
+
+  llvm::BasicBlock *CheckBody = CGF.createBasicBlock("approx.check_init");
+  CGF.EmitBranch(CheckBody);
+
+  Address ArrayIptBase{nullptr, nullptr, CharUnits::Zero()};
+  Address ArrayOptBase{nullptr, nullptr, CharUnits::Zero()};
+
+ CGF.EmitBlock(CheckBody);
+
+  if(requiresInputs && Inputs.size() > 0)
+    {
+      sprintf(namePtr, ".dep.approx_ipt_ptrs.arr.addr_%d", input_arrays);
+      ArrayIptBase = declarePtrArrays(CGF, Inputs, namePtr);
+
+    }
+
+  sprintf(namePtr, ".dep.approx_opt_ptrs.arr.addr_%d", output_arrays);
+  ArrayOptBase = declarePtrArrays(CGF, Outputs, namePtr);
+  llvm::Value *InitCheckValue = CGF.EmitLoadOfScalar(InitCheck, false, BoolTy, SourceLocation());
+
+  llvm::BasicBlock *StoreBody = CGF.createBasicBlock("approx.init_vars");
+  llvm::BasicBlock *ContinueBody = CGF.createBasicBlock("approx.continue");
+  llvm::Value *InitDone = CGF.Builder.CreateICmpEQ(InitCheckValue, llvm::ConstantInt::get(CGF.Int8Ty, 1));
+  CGF.Builder.CreateCondBr(InitDone, ContinueBody, StoreBody);
+
+  CGF.EmitBlock(StoreBody);
+  CGF.EmitStoreOfScalar(llvm::ConstantInt::get(CGF.Int8Ty, 1, false), InitCheck, false, BoolTy, AlignmentSource::Type, false, false);
+
   llvm::Value *NumOfElements, *InfoAddress, *PtrAddress;
   if (requiresInputs && Inputs.size() > 0) {
-    sprintf(nameInfo, ".dep.approx_inputs.arr.addr_%d", input_arrays);
-    sprintf(namePtr, ".dep.approx_ipt_ptrs.arr.addr_%d", input_arrays++);
-    std::tie(NumOfElements, InfoAddress, PtrAddress) =
-      CGApproxRuntimeEmitData(CGF, Inputs, nameInfo, namePtr);
+    sprintf(nameInfo, ".dep.approx_inputs.arr.addr_%d", input_arrays++);
+    std::tie(NumOfElements, InfoAddress) =
+      CGApproxRuntimeGPUEmitData(CGF, Inputs, ArrayIptBase, nameInfo);
     approxRTParams[DevDataDescIn] = InfoAddress;
-    approxRTParams[DevDataPtrIn] = PtrAddress;
+    approxRTParams[DevDataPtrIn] = CGF.Builder.CreatePointerBitCastOrAddrSpaceCast(
+                            ArrayIptBase.getPointer(), CGF.VoidPtrTy);
     approxRTParams[DevDataSizeIn] = NumOfElements;
   }
 
   // All approximation techniques require the output
-  sprintf(nameInfo, ".dep.approx_outputs.arr.addr_%d", output_arrays);
-  sprintf(namePtr, ".dep.approx_opt_ptrs.arr.addr_%d", output_arrays++);
-  std::tie(NumOfElements, InfoAddress, PtrAddress) =
-    CGApproxRuntimeEmitData(CGF, Outputs, nameInfo, namePtr);
+  sprintf(nameInfo, ".dep.approx_outputs.arr.addr_%d", output_arrays++);
+  std::tie(NumOfElements, InfoAddress) =
+    CGApproxRuntimeGPUEmitData(CGF, Outputs, ArrayOptBase, nameInfo);
   approxRTParams[DevDataDescOut] = InfoAddress;
-  approxRTParams[DevDataPtrOut] = PtrAddress;
+  approxRTParams[DevDataPtrOut] = CGF.Builder.CreatePointerBitCastOrAddrSpaceCast(ArrayOptBase.getPointer(), CGF.VoidPtrTy);
   approxRTParams[DevDataSizeOut] = NumOfElements;
+
+  // now the metadata have been written once, but we need to write the
+  // pointer in the ContinueBody because it will be different each iteration
+  CGF.EmitBranch(ContinueBody);
+  CGF.EmitBlock(ContinueBody);
+
+  if(requiresInputs && Inputs.size() > 0) {
+    CGApproxRuntimeEmitInitData(CGF, Inputs, ArrayIptBase);
+  }
+  CGApproxRuntimeEmitInitData(CGF, Outputs, ArrayOptBase);
 }
