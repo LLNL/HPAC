@@ -535,11 +535,13 @@ void __approx_device_memo(void (*accurateFN)(void *), void *arg, int memo_type, 
   int n_output_values = 0;
 
   // FIXME: assume inputs are the same size
+  #pragma unroll
   for(int i = 0; i < nInputs; i++)
     {
       i_tab_offset += ipts[i].num_elem;
     }
 
+  #pragma unroll
   for(int i = 0; i < nOutputs; i++)
     {
       n_output_values += opts[i].num_elem;
@@ -572,6 +574,7 @@ void __approx_device_memo(void (*accurateFN)(void *), void *arg, int memo_type, 
     {
       dist_total = 0;
       offset = 0;
+      #pragma unroll
       for(int j = 0; j < nInputs; j++)
         {
           dist_total += _ipt_table.calc_distance(in_reg[j], ipts[j], ipts[j].num_elem, k, offset);
@@ -662,6 +665,7 @@ void __approx_device_memo(void (*accurateFN)(void *), void *arg, int memo_type, 
 
       if(have_max_dist)
         {
+          #pragma unroll
       for(int j = 0; j < nOutputs; j++)
         {
           for(size_t i = 0; i < opts[j].num_elem; i++)
