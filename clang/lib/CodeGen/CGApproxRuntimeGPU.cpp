@@ -249,27 +249,19 @@ CGApproxRuntimeGPU::CGApproxRuntimeGPU(CodeGenModule &CGM)
 
   // This is the runtime call function type information, which mirrors the
   // types provided in the argument parameters.
-  // RTFnTy = llvm::FunctionType::get(CGM.VoidTy,
-  //                                        {
-  //                                          /* Orig. fn ptr*/ llvm::PointerType::getUnqual(CallbackFnTy),
-  //                                          /* Captured data ptr*/ CGM.VoidPtrTy,
-  //                                          /* Memoization Type */ CGM.Int32Ty,
-  //                                          /* Input Data Descr. */ CGM.VoidPtrTy,
-  //                                          /* Input Data Pointers. */ CGM.VoidPtrTy,
-  //                                          /* Input Data Num Elements */ CGM.Int32Ty,
-  //                                          /* Output Data Descr. */ CGM.VoidPtrTy,
-  //                                          /* Output Data Pointers. */ CGM.VoidPtrTy,
-  //                                          /* Output Data Num Elements */ CGM.Int32Ty
-  //                                        },
-  //                                        false);
-
   RTFnTy = llvm::FunctionType::get(CGM.VoidTy,
                                          {
                                            /* Orig. fn ptr*/ llvm::PointerType::getUnqual(CallbackFnTy),
-                                           /* Captured data ptr*/ CGM.VoidPtrTy
+                                           /* Captured data ptr*/ CGM.VoidPtrTy,
+                                           /* Memoization Type */ CGM.Int32Ty,
+                                           /* Input Data Descr. */ CGM.VoidPtrTy,
+                                           /* Input Data Pointers. */ CGM.VoidPtrTy,
+                                           /* Input Data Num Elements */ CGM.Int32Ty,
+                                           /* Output Data Descr. */ CGM.VoidPtrTy,
+                                           /* Output Data Pointers. */ CGM.VoidPtrTy,
+                                           /* Output Data Num Elements */ CGM.Int32Ty
                                          },
                                          false);
-
 }
 
 // CGApproxRuntimeGPU::~CGApproxRuntimeGPU(){ delete RegionInfo };
@@ -286,11 +278,11 @@ void CGApproxRuntimeGPU::CGApproxRuntimeEnterRegion(CodeGenFunction &CGF,
   llvm::PointerType *CharPtrTy =
       llvm::PointerType::getUnqual(Types.ConvertType(C.CharTy));
   /// Reset All info of the Runtime "state machine"
-  // getVarInfoType(C, VarRegionSpecTy);
-  // getVarPtrType(C, VarPtrTy);
+  getVarInfoType(C, VarRegionSpecTy);
+  getVarPtrType(C, VarPtrTy);
   Inputs.clear();
   Outputs.clear();
-  for (unsigned i = DEV_ARG_START; i < 2; i++)
+  for (unsigned i = DEV_ARG_START; i < DEV_ARG_END; i++)
     approxRTParams[i] = nullptr;
 
   Address CapStructAddr = CGF.GenerateCapturedStmtArgument(CS);
@@ -306,14 +298,14 @@ void CGApproxRuntimeGPU::CGApproxRuntimeEnterRegion(CodeGenFunction &CGF,
     CGF.Builder.CreatePointerCast(Fn, CallbackFnTy->getPointerTo());
   approxRTParams[DevCapDataPtr] =
       CGF.Builder.CreatePointerCast(CapStructAddr.getPointer(), CGM.VoidPtrTy);
-  // approxRTParams[DevDataDescIn] = llvm::ConstantPointerNull::get(CGM.VoidPtrTy);
-  // approxRTParams[DevDataSizeIn] =
-  //     llvm::ConstantInt::get(CGF.Builder.getInt32Ty(), 0);
-  // approxRTParams[DevDataDescOut] = llvm::ConstantPointerNull::get(CGM.VoidPtrTy);
-  // approxRTParams[DevDataSizeOut] =
-  //     llvm::ConstantInt::get(CGF.Builder.getInt32Ty(), 0);
-  // approxRTParams[DevMemoDescr] =
-  //     llvm::ConstantInt::get(CGF.Builder.getInt32Ty(), 0);
+  approxRTParams[DevDataDescIn] = llvm::ConstantPointerNull::get(CGM.VoidPtrTy);
+  approxRTParams[DevDataSizeIn] =
+      llvm::ConstantInt::get(CGF.Builder.getInt32Ty(), 0);
+  approxRTParams[DevDataDescOut] = llvm::ConstantPointerNull::get(CGM.VoidPtrTy);
+  approxRTParams[DevDataSizeOut] =
+      llvm::ConstantInt::get(CGF.Builder.getInt32Ty(), 0);
+  approxRTParams[DevMemoDescr] =
+      llvm::ConstantInt::get(CGF.Builder.getInt32Ty(), 0);
 
   StartLoc = CS.getBeginLoc();
   EndLoc = CS.getEndLoc();
@@ -324,15 +316,15 @@ void CGApproxRuntimeGPU::CGApproxRuntimeEmitMemoInit(
     CodeGenFunction &CGF, ApproxMemoClause &MemoClause) {
   requiresData = true;
   switch(MemoClause.getMemoType()) {
-    // case approx::MT_IN:
-    //   requiresInputs = true;
-    //   approxRTParams[DevMemoDescr] =
-    //     llvm::ConstantInt::get(CGF.Builder.getInt32Ty(), 1);
-    //   break;
-    // case approx::MT_OUT:
-    // approxRTParams[DevMemoDescr] =
-    //     llvm::ConstantInt::get(CGF.Builder.getInt32Ty(), 2);
-    //   break;
+    case approx::MT_IN:
+      requiresInputs = true;
+      approxRTParams[DevMemoDescr] =
+        llvm::ConstantInt::get(CGF.Builder.getInt32Ty(), 1);
+      break;
+    case approx::MT_OUT:
+    approxRTParams[DevMemoDescr] =
+        llvm::ConstantInt::get(CGF.Builder.getInt32Ty(), 2);
+      break;
     }
 }
 
@@ -366,17 +358,18 @@ void CGApproxRuntimeGPU::CGApproxRuntimeEmitInitData(
   enum VarPtrFieldID { PTR, NUM_ELEM, STRIDE };
 
   for (auto P : Data) {
+    llvm::SmallVector<llvm::Constant*, 3> SpecInit;
     llvm::Value *Addr;
     Expr *E = P.first;
     Directionality Dir = P.second;
     Addr = getPointer(CGF, E);
     // Store Addr
-    // LValue Base = CGF.MakeAddrLValue(
-    //     CGF.Builder.CreateConstGEP(VarPtrArray, Pos), VarPtrTy);
-    // auto *FieldT = *std::next(VarPtrRecord->field_begin(), PTR);
-    // LValue BaseAddrLVal = CGF.EmitLValueForField(Base, FieldT);
-    // CGF.EmitStoreOfScalar(CGF.Builder.CreatePtrToInt(Addr, CGF.IntPtrTy),
-    //                       BaseAddrLVal);
+    LValue Base = CGF.MakeAddrLValue(
+        CGF.Builder.CreateConstGEP(VarPtrArray, Pos), VarPtrTy);
+    auto *FieldT = *std::next(VarPtrRecord->field_begin(), PTR);
+    LValue BaseAddrLVal = CGF.EmitLValueForField(Base, FieldT);
+    CGF.EmitStoreOfScalar(CGF.Builder.CreatePtrToInt(Addr, CGF.IntPtrTy),
+                          BaseAddrLVal);
     Pos++;
   }
 }
@@ -426,22 +419,22 @@ CGApproxRuntimeGPU::CGApproxRuntimeGPUEmitData(
     llvm::Value *SizeOfElement;
     Expr *E = P.first;
     Directionality Dir = P.second;
-    // std::tie(Addr, NumElements, SizeOfElement, AccessStride, TypeOfElement) =
-    //     getPointerAndSize(CGF, E);
-    // LValue Base = CGF.MakeAddrLValue(
-    //     CGF.Builder.CreateConstGEP(VarPtrArrGEP, Pos), VarPtrTy);
-    // // Store NUM_ELEMENTS
-    // LValue nElemLVal = CGF.EmitLValueForField(
-    //     Base, *std::next(VarPtrRecord->field_begin(), NUM_ELEM));
-    // CGF.EmitStoreOfScalar(NumElements, nElemLVal);
+    std::tie(Addr, NumElements, SizeOfElement, AccessStride, TypeOfElement) =
+        getPointerAndSize(CGF, E);
+    LValue Base = CGF.MakeAddrLValue(
+        CGF.Builder.CreateConstGEP(VarPtrArrGEP, Pos), VarPtrTy);
+    // Store NUM_ELEMENTS
+    LValue nElemLVal = CGF.EmitLValueForField(
+        Base, *std::next(VarPtrRecord->field_begin(), NUM_ELEM));
+    CGF.EmitStoreOfScalar(NumElements, nElemLVal);
 
     // Store SZ_ELEM
     SpecInit.push_back(static_cast<llvm::Constant*>(SizeOfElement));
 
     // Store STRIDE
-    // LValue strideElemLVal = CGF.EmitLValueForField(
-    //     Base, *std::next(VarPtrRecord->field_begin(), STRIDE));
-    // CGF.EmitStoreOfScalar(AccessStride, strideElemLVal);
+    LValue strideElemLVal = CGF.EmitLValueForField(
+        Base, *std::next(VarPtrRecord->field_begin(), STRIDE));
+    CGF.EmitStoreOfScalar(AccessStride, strideElemLVal);
 
     // Store DATA_TYPE
     SpecInit.push_back(static_cast<llvm::Constant*>(TypeOfElement));
@@ -453,35 +446,34 @@ CGApproxRuntimeGPU::CGApproxRuntimeGPUEmitData(
     Pos++;
   }
 
-  // llvm::SmallVector<llvm::Type*, 3> STTypes{CGF.SizeTy, CGF.Int8Ty, CGF.Int8Ty};
-  // llvm::StructType *VarSpecStructType = llvm::StructType::get(CGM.getLLVMContext(),
-  //                                                             STTypes);
-  // VarSpecStructType->setName("approx_region_specification");
-  // llvm::ArrayType *SpecStructArrTy = llvm::ArrayType::get(VarSpecStructType, numVars);
-  // std::vector<llvm::Constant *> InitStructs;
-  // // Create each struct individually
-  // for(auto S : RegionSpecInit) {
+  llvm::SmallVector<llvm::Type*, 3> STTypes{CGF.SizeTy, CGF.Int8Ty, CGF.Int8Ty};
+  llvm::StructType *VarSpecStructType = llvm::StructType::get(CGM.getLLVMContext(),
+                                                              STTypes);
+  VarSpecStructType->setName("approx_region_specification");
+  llvm::ArrayType *SpecStructArrTy = llvm::ArrayType::get(VarSpecStructType, numVars);
+  std::vector<llvm::Constant *> InitStructs;
+  // Create each struct individually
+  for(auto S : RegionSpecInit) {
 
-  //   InitStructs.push_back(llvm::ConstantStruct::get(VarSpecStructType, S));
-  // }
-  // llvm::Constant *InitArray = llvm::ConstantArray::get(SpecStructArrTy, InitStructs);
+    InitStructs.push_back(llvm::ConstantStruct::get(VarSpecStructType, S));
+  }
+  llvm::Constant *InitArray = llvm::ConstantArray::get(SpecStructArrTy, InitStructs);
 
-  // // Leak, but who cares
-  // RegionInfo = new GlobalVariable(CGM.getModule(), SpecStructArrTy, true, GlobalValue::InternalLinkage,
-  //                                 InitArray,
-  //                                 infoName,
-  //                                 /*InsertBefore=*/ nullptr,
-  //                                 /*ThreadLocalMode=*/ GlobalValue::NotThreadLocal,
-  //                                 // how do we do this better?
-  //                                 Optional<unsigned>((unsigned) 4)
-  //                                 );
+  // Leak, but who cares
+  RegionInfo = new GlobalVariable(CGM.getModule(), SpecStructArrTy, true, GlobalValue::InternalLinkage,
+                                  InitArray,
+                                  infoName,
+                                  /*InsertBefore=*/ nullptr,
+                                  /*ThreadLocalMode=*/ GlobalValue::NotThreadLocal,
+                                  // how do we do this better?
+                                  Optional<unsigned>((unsigned) 4)
+                                  );
 
-  // // todo: address space cast for info type
-  // return std::make_tuple(NumOfElements,
-  //                        CGF.Builder.CreatePointerBitCastOrAddrSpaceCast(
-  //                        RegionInfo, CGF.VoidPtrTy)
-  //                        );
-  return std::make_tuple(nullptr, nullptr);
+  // todo: address space cast for info type
+  return std::make_tuple(NumOfElements,
+                         CGF.Builder.CreatePointerBitCastOrAddrSpaceCast(
+                         RegionInfo, CGF.VoidPtrTy)
+                         );
 }
 
 void CGApproxRuntimeGPU::CGApproxRuntimeEmitDataValues(CodeGenFunction &CGF) {
@@ -499,59 +491,59 @@ void CGApproxRuntimeGPU::CGApproxRuntimeEmitDataValues(CodeGenFunction &CGF) {
   // any way to have actual bool?
   Address InitCheck = CGM.getOpenMPRuntime().ApproxInitCheck;
 
-  // llvm::BasicBlock *CheckBody = CGF.createBasicBlock("approx.check_init");
-  // CGF.EmitBranch(CheckBody);
+  llvm::BasicBlock *CheckBody = CGF.createBasicBlock("approx.check_init");
+  CGF.EmitBranch(CheckBody);
 
   Address ArrayIptBase{nullptr, nullptr, CharUnits::Zero()};
   Address ArrayOptBase{nullptr, nullptr, CharUnits::Zero()};
 
- // CGF.EmitBlock(CheckBody);
+ CGF.EmitBlock(CheckBody);
 
-  // if(requiresInputs && Inputs.size() > 0)
-  //   {
-  //     sprintf(namePtr, ".dep.approx_ipt_ptrs.arr.addr_%d", input_arrays);
-  //     ArrayIptBase = declarePtrArrays(CGF, Inputs, namePtr);
+  if(requiresInputs && Inputs.size() > 0)
+    {
+      sprintf(namePtr, ".dep.approx_ipt_ptrs.arr.addr_%d", input_arrays);
+      ArrayIptBase = declarePtrArrays(CGF, Inputs, namePtr);
 
-  //   }
+    }
 
-  // sprintf(namePtr, ".dep.approx_opt_ptrs.arr.addr_%d", output_arrays);
-  // ArrayOptBase = declarePtrArrays(CGF, Outputs, namePtr);
-  // llvm::Value *InitCheckValue = CGF.EmitLoadOfScalar(InitCheck, false, BoolTy, SourceLocation());
+  sprintf(namePtr, ".dep.approx_opt_ptrs.arr.addr_%d", output_arrays);
+  ArrayOptBase = declarePtrArrays(CGF, Outputs, namePtr);
+  llvm::Value *InitCheckValue = CGF.EmitLoadOfScalar(InitCheck, false, BoolTy, SourceLocation());
 
-  // llvm::BasicBlock *StoreBody = CGF.createBasicBlock("approx.init_vars");
-  // llvm::BasicBlock *ContinueBody = CGF.createBasicBlock("approx.continue");
-  // llvm::Value *InitDone = CGF.Builder.CreateICmpEQ(InitCheckValue, llvm::ConstantInt::get(CGF.Int8Ty, 1));
-  // CGF.Builder.CreateCondBr(InitDone, ContinueBody, StoreBody);
+  llvm::BasicBlock *StoreBody = CGF.createBasicBlock("approx.init_vars");
+  llvm::BasicBlock *ContinueBody = CGF.createBasicBlock("approx.continue");
+  llvm::Value *InitDone = CGF.Builder.CreateICmpEQ(InitCheckValue, llvm::ConstantInt::get(CGF.Int8Ty, 1));
+  CGF.Builder.CreateCondBr(InitDone, ContinueBody, StoreBody);
 
-  // CGF.EmitBlock(StoreBody);
-  // CGF.EmitStoreOfScalar(llvm::ConstantInt::get(CGF.Int8Ty, 1, false), InitCheck, false, BoolTy, AlignmentSource::Type, false, false);
+  CGF.EmitBlock(StoreBody);
+  CGF.EmitStoreOfScalar(llvm::ConstantInt::get(CGF.Int8Ty, 1, false), InitCheck, false, BoolTy, AlignmentSource::Type, false, false);
 
-  // llvm::Value *NumOfElements, *InfoAddress, *PtrAddress;
-  // if (requiresInputs && Inputs.size() > 0) {
-  //   sprintf(nameInfo, ".dep.approx_inputs.arr.addr_%d", input_arrays++);
-  //   std::tie(NumOfElements, InfoAddress) =
-  //     CGApproxRuntimeGPUEmitData(CGF, Inputs, ArrayIptBase, nameInfo);
-    // approxRTParams[DevDataDescIn] = InfoAddress;
-    // approxRTParams[DevDataPtrIn] = CGF.Builder.CreatePointerBitCastOrAddrSpaceCast(
-    //                         ArrayIptBase.getPointer(), CGF.VoidPtrTy);
-    // approxRTParams[DevDataSizeIn] = NumOfElements;
-  // }
+  llvm::Value *NumOfElements, *InfoAddress, *PtrAddress;
+  if (requiresInputs && Inputs.size() > 0) {
+    sprintf(nameInfo, ".dep.approx_inputs.arr.addr_%d", input_arrays++);
+    std::tie(NumOfElements, InfoAddress) =
+      CGApproxRuntimeGPUEmitData(CGF, Inputs, ArrayIptBase, nameInfo);
+    approxRTParams[DevDataDescIn] = InfoAddress;
+    approxRTParams[DevDataPtrIn] = CGF.Builder.CreatePointerBitCastOrAddrSpaceCast(
+                            ArrayIptBase.getPointer(), CGF.VoidPtrTy);
+    approxRTParams[DevDataSizeIn] = NumOfElements;
+  }
 
   // All approximation techniques require the output
-  // sprintf(nameInfo, ".dep.approx_outputs.arr.addr_%d", output_arrays++);
-  // std::tie(NumOfElements, InfoAddress) =
-  //   CGApproxRuntimeGPUEmitData(CGF, Outputs, ArrayOptBase, nameInfo);
-  // approxRTParams[DevDataDescOut] = InfoAddress;
-  // approxRTParams[DevDataPtrOut] = CGF.Builder.CreatePointerBitCastOrAddrSpaceCast(ArrayOptBase.getPointer(), CGF.VoidPtrTy);
-  // approxRTParams[DevDataSizeOut] = NumOfElements;
+  sprintf(nameInfo, ".dep.approx_outputs.arr.addr_%d", output_arrays++);
+  std::tie(NumOfElements, InfoAddress) =
+    CGApproxRuntimeGPUEmitData(CGF, Outputs, ArrayOptBase, nameInfo);
+  approxRTParams[DevDataDescOut] = InfoAddress;
+  approxRTParams[DevDataPtrOut] = CGF.Builder.CreatePointerBitCastOrAddrSpaceCast(ArrayOptBase.getPointer(), CGF.VoidPtrTy);
+  approxRTParams[DevDataSizeOut] = NumOfElements;
 
   // now the metadata have been written once, but we need to write the
   // pointer in the ContinueBody because it will be different each iteration
-  // CGF.EmitBranch(ContinueBody);
-  // CGF.EmitBlock(ContinueBody);
+  CGF.EmitBranch(ContinueBody);
+  CGF.EmitBlock(ContinueBody);
 
   if(requiresInputs && Inputs.size() > 0) {
-    // CGApproxRuntimeEmitInitData(CGF, Inputs, ArrayIptBase);
+    CGApproxRuntimeEmitInitData(CGF, Inputs, ArrayIptBase);
   }
-  // CGApproxRuntimeEmitInitData(CGF, Outputs, ArrayOptBase);
+  CGApproxRuntimeEmitInitData(CGF, Outputs, ArrayOptBase);
 }

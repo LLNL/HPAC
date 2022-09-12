@@ -521,183 +521,174 @@ unsigned int tnum_in_table_with_max_dist(float max_dist)
 }
 
 
-void __approx_device_memo(void (*accurateFN)(void *), void *arg)
+void __approx_device_memo(void (*accurateFN)(void *), void *arg, int memo_type, const void *region_info_in, const void *inputs, int nInputs, const void *region_info_out, void *outputs, int nOutputs)
 {
-  accurateFN(arg);
+  const approx_region_specification *in_reg = (const approx_region_specification*) region_info_in;
+  const approx_region_specification *out_reg = (const approx_region_specification*) region_info_out;
+  const approx_var_ptr_t *ipts = (approx_var_ptr_t*) inputs;
+  approx_var_ptr_t *opts = (approx_var_ptr_t*) outputs;
+  int tid_global = omp_get_thread_num() + omp_get_team_num() * omp_get_num_threads();
+  real_t n_input_values = 0.0;
+  int entry_index = -1;
+  size_t i_tab_offset = 0;
+  int n_output_values = 0;
+
+  // FIXME: assume inputs are the same size
+  for(int i = 0; i < nInputs; i++)
+    {
+      i_tab_offset += ipts[i].num_elem;
+    }
+
+  for(int i = 0; i < nOutputs; i++)
+    {
+      n_output_values += opts[i].num_elem;
+    }
+
+  n_input_values = i_tab_offset;
+
+  int tables_per_block = (omp_get_num_threads()/NTHREADS_PER_WARP) * TABLES_PER_WARP;
+  int s_tab_size = ((int)(n_input_values)*tables_per_block*(*RTEnvd.tabNumEntries));
+  int gmem_start = s_tab_size * omp_get_team_num();
+
+  real_t ipt_table[SM_SZ_IN_BYTES/4];
+  #pragma omp allocate(ipt_table) allocator(omp_pteam_mem_alloc)
+  int n_sm_vals = SM_SZ_IN_BYTES/4;
+
+  MemoTable<real_t, SM_SZ_IN_BYTES, NTHREADS_PER_WARP, TABLES_PER_WARP> _ipt_table{*RTEnvd.tabNumEntries, ipt_table,
+                                                                                   n_input_values, RTEnvd.inputIdx, RTEnvd.ClockIndexes,
+                                                                                   RTEnvd.ReplacementData, RTEnvd.TableRP
+  };
+
+  syncThreadsAligned();
+  _ipt_table.copy_from(RTEnvd.iTable + gmem_start);
+  syncThreadsAligned();
+
+  int offset = 0;
+  real_t dist_total = 0;
+  real_t my_max_dist = 0.0f;
+
+  for(int k = 0; k < _ipt_table.getSize(); k++)
+    {
+      dist_total = 0;
+      offset = 0;
+      for(int j = 0; j < nInputs; j++)
+        {
+          dist_total += _ipt_table.calc_distance(in_reg[j], ipts[j], ipts[j].num_elem, k, offset);
+          offset += ipts[j].num_elem;
+        }
+
+      dist_total /= n_input_values;
+      my_max_dist = max(my_max_dist, dist_total);
+      // TODO: is divergence an issue?
+      if(dist_total < *RTEnvd.threshold)
+        {
+          entry_index = k;
+          break;
+        }
+    }
+
+  // every thread needs to participate because we use butterfly reduction
+  // that requires power of 2 participation
+  bool have_max_dist = tnum_in_table_with_max_dist(my_max_dist) == tid_global;
+
+  // table management
+  {
+  // one thread will register an access with the ReplacementData table
+  // we have to synchronize afterward to remove race condition
+  // between updating ReplacementData and adding any new entry
+  if(entry_index != -1 && dist_total < *RTEnvd.threshold)
+    {
+      _ipt_table.registerAccess(entry_index);
+    }
+
+    unsigned int my_mask = get_table_mask();
+    syncWarp(my_mask);
+
+  }
+
+  if(entry_index != -1 && dist_total < *RTEnvd.threshold)
+    {
+      offset = 0;
+      for(int j = 0; j < nOutputs; j++)
+        {
+          for(int i = 0; i < opts[j].num_elem; i++)
+            {
+              int tid_in_block = omp_get_thread_num();
+              int tid_in_warp = tid_in_block % NTHREADS_PER_WARP;
+              int warp_in_block = tid_in_block / NTHREADS_PER_WARP;
+              int table_in_warp = tid_in_warp / (NTHREADS_PER_WARP/TABLES_PER_WARP);
+              int table_number = warp_in_block * TABLES_PER_WARP + table_in_warp;
+
+
+              int row_number = entry_index * n_output_values + offset + i;
+              int access_idx = (row_number * tables_per_block) + table_number;
+              int o_tab_size = (n_output_values*tables_per_block*(*RTEnvd.tabNumEntries));
+              int gmem_start_o = o_tab_size * omp_get_team_num();
+
+              convertFromSingleWithOffset(opts[j].ptr,
+                                          RTEnvd.oTable,
+                                          i, access_idx+gmem_start_o,
+                                          (ApproxType) out_reg[j].data_type
+                                          );
+            }
+          offset += opts[j].num_elem;
+        }
+
+      #ifdef APPROX_DEV_STATS
+      RTEnvd.approx_count[tid_global] += 1;
+      #endif // APPROX_DEV_STATS
+    }
+  else
+    {
+
+      // NOTE: for correctness of inout, we have to copy the input before calling accurateFN
+      if(have_max_dist)
+        {
+          _ipt_table.add_entry(in_reg, ipts, nInputs);
+        }
+
+      accurateFN(arg);
+
+      #ifdef APPROX_DEV_STATS
+      RTEnvd.accurate_count[tid_global] += 1;
+      #endif // APPROX_DEV_STATS
+
+      offset = 0;
+      // I certainly wrote here above, we just use entry index as the row number
+      // We want to subtract 1 to get entry index before it was incremented above,
+      // ensuring it is always above 0
+      // TODO: this should be size_t
+
+      if(have_max_dist)
+        {
+      for(int j = 0; j < nOutputs; j++)
+        {
+          for(size_t i = 0; i < opts[j].num_elem; i++)
+            {
+              int tid_in_block = omp_get_thread_num();
+              int tid_in_warp = tid_in_block % NTHREADS_PER_WARP;
+              int warp_in_block = tid_in_block / NTHREADS_PER_WARP;
+              int table_in_warp = tid_in_warp / (NTHREADS_PER_WARP/TABLES_PER_WARP);
+              int table_number = warp_in_block * TABLES_PER_WARP + table_in_warp;
+
+              entry_index = max(RTEnvd.inputIdx[tables_per_block * omp_get_team_num() + table_number]-1, 0);
+              int row_number = entry_index * n_output_values + offset + i;
+              int access_idx = (row_number * tables_per_block) + table_number;
+
+
+              int o_tab_size = (n_output_values*tables_per_block*(*RTEnvd.tabNumEntries));
+              int gmem_start_o = o_tab_size * omp_get_team_num();
+              convertToSingleWithOffset(RTEnvd.oTable, opts[j].ptr, access_idx+gmem_start_o, i,
+                                        (ApproxType) out_reg[j].data_type);
+
+            }
+          offset += opts[j].num_elem;
+        }
+      }
+    }
+
+  // race condition between writer thread that has max dist and other threads
+  syncThreadsAligned();
+  _ipt_table.copy_to(RTEnvd.iTable+gmem_start);
 }
-// void __approx_device_memo(void (*accurateFN)(void *), void *arg, int memo_type, const void *region_info_in, void *inputs, int nInputs, const void *region_info_out, void *outputs, int nOutputs)
-// {
-//   accurateFN(arg);
-//   return;
-//   const approx_region_specification *in_reg = (const approx_region_specification*) region_info_in;
-//   const approx_region_specification *out_reg = (const approx_region_specification*) region_info_out;
-//   approx_var_ptr_t *ipts = (approx_var_ptr_t*) inputs;
-//   approx_var_ptr_t *opts = (approx_var_ptr_t*) outputs;
-//   int tid_global = omp_get_thread_num() + omp_get_team_num() * omp_get_num_threads();
-//   real_t n_input_values = 0.0;
-//   int entry_index = -1;
-//   size_t i_tab_offset = 0;
-//   int n_output_values = 0;
-
-//   // FIXME: assume inputs are the same size
-//   for(int i = 0; i < nInputs; i++)
-//     {
-//       ipts[i].num_elem = 1;
-//       i_tab_offset += ipts[i].num_elem;
-//     }
-
-//   for(int i = 0; i < nOutputs; i++)
-//     {
-//       n_output_values += opts[i].num_elem;
-//     }
-
-//   n_input_values = i_tab_offset;
-
-//   int tables_per_block = (omp_get_num_threads()/NTHREADS_PER_WARP) * TABLES_PER_WARP;
-//   int s_tab_size = ((int)(n_input_values)*tables_per_block*(*RTEnvd.tabNumEntries));
-//   int gmem_start = s_tab_size * omp_get_team_num();
-
-//   real_t ipt_table[SM_SZ_IN_BYTES/4];
-//   #pragma omp allocate(ipt_table) allocator(omp_pteam_mem_alloc)
-//   int n_sm_vals = SM_SZ_IN_BYTES/4;
-
-//   MemoTable<real_t, SM_SZ_IN_BYTES, NTHREADS_PER_WARP, TABLES_PER_WARP> _ipt_table{*RTEnvd.tabNumEntries, ipt_table,
-//                                                                                    n_input_values, RTEnvd.inputIdx, RTEnvd.ClockIndexes,
-//                                                                                    RTEnvd.ReplacementData, RTEnvd.TableRP
-//   };
-
-//   syncThreadsAligned();
-//   _ipt_table.copy_from(RTEnvd.iTable + gmem_start);
-//   syncThreadsAligned();
-
-//   int offset = 0;
-//   real_t dist_total = 0;
-//   real_t my_max_dist = 0.0f;
-
-//   for(int k = 0; k < _ipt_table.getSize(); k++)
-//     {
-//       dist_total = 0;
-//       offset = 0;
-//       for(int j = 0; j < nInputs; j++)
-//         {
-//           if(ipts[j].ptr == nullptr)
-//             printf("Oh, it's null\n");
-//           dist_total += _ipt_table.calc_distance(in_reg[j], ipts[j], ipts[j].num_elem, k, offset);
-//           offset += ipts[j].num_elem;
-//         }
-
-//       dist_total /= n_input_values;
-//       my_max_dist = max(my_max_dist, dist_total);
-//       // TODO: is divergence an issue?
-//       if(dist_total < *RTEnvd.threshold)
-//         {
-//           entry_index = k;
-//           break;
-//         }
-//     }
-
-//   // every thread needs to participate because we use butterfly reduction
-//   // that requires power of 2 participation
-//   bool have_max_dist = tnum_in_table_with_max_dist(my_max_dist) == tid_global;
-
-//   // table management
-//   {
-//   // one thread will register an access with the ReplacementData table
-//   // we have to synchronize afterward to remove race condition
-//   // between updating ReplacementData and adding any new entry
-//   if(entry_index != -1 && dist_total < *RTEnvd.threshold)
-//     {
-//       _ipt_table.registerAccess(entry_index);
-//     }
-
-//     unsigned int my_mask = get_table_mask();
-//     syncWarp(my_mask);
-
-//   }
-
-//   if(entry_index != -1 && dist_total < *RTEnvd.threshold)
-//     {
-//       offset = 0;
-//       for(int j = 0; j < nOutputs; j++)
-//         {
-//           for(int i = 0; i < opts[j].num_elem; i++)
-//             {
-//               int tid_in_block = omp_get_thread_num();
-//               int tid_in_warp = tid_in_block % NTHREADS_PER_WARP;
-//               int warp_in_block = tid_in_block / NTHREADS_PER_WARP;
-//               int table_in_warp = tid_in_warp / (NTHREADS_PER_WARP/TABLES_PER_WARP);
-//               int table_number = warp_in_block * TABLES_PER_WARP + table_in_warp;
-
-
-//               int row_number = entry_index * n_output_values + offset + i;
-//               int access_idx = (row_number * tables_per_block) + table_number;
-//               int o_tab_size = (n_output_values*tables_per_block*(*RTEnvd.tabNumEntries));
-//               int gmem_start_o = o_tab_size * omp_get_team_num();
-
-//               convertFromSingleWithOffset(opts[j].ptr,
-//                                           RTEnvd.oTable,
-//                                           i, access_idx+gmem_start_o,
-//                                           (ApproxType) out_reg[j].data_type
-//                                           );
-//             }
-//           offset += opts[j].num_elem;
-//         }
-
-//       #ifdef APPROX_DEV_STATS
-//       RTEnvd.approx_count[tid_global] += 1;
-//       #endif // APPROX_DEV_STATS
-//     }
-//   else
-//     {
-
-//       // NOTE: for correctness of inout, we have to copy the input before calling accurateFN
-//       if(have_max_dist)
-//         {
-//           _ipt_table.add_entry(in_reg, ipts, nInputs);
-//         }
-
-//       accurateFN(arg);
-
-//       #ifdef APPROX_DEV_STATS
-//       RTEnvd.accurate_count[tid_global] += 1;
-//       #endif // APPROX_DEV_STATS
-
-//       offset = 0;
-//       // I certainly wrote here above, we just use entry index as the row number
-//       // We want to subtract 1 to get entry index before it was incremented above,
-//       // ensuring it is always above 0
-//       // TODO: this should be size_t
-
-//       if(have_max_dist)
-//         {
-//       for(int j = 0; j < nOutputs; j++)
-//         {
-//           for(size_t i = 0; i < opts[j].num_elem; i++)
-//             {
-//               int tid_in_block = omp_get_thread_num();
-//               int tid_in_warp = tid_in_block % NTHREADS_PER_WARP;
-//               int warp_in_block = tid_in_block / NTHREADS_PER_WARP;
-//               int table_in_warp = tid_in_warp / (NTHREADS_PER_WARP/TABLES_PER_WARP);
-//               int table_number = warp_in_block * TABLES_PER_WARP + table_in_warp;
-
-//               entry_index = max(RTEnvd.inputIdx[tables_per_block * omp_get_team_num() + table_number]-1, 0);
-//               int row_number = entry_index * n_output_values + offset + i;
-//               int access_idx = (row_number * tables_per_block) + table_number;
-
-
-//               int o_tab_size = (n_output_values*tables_per_block*(*RTEnvd.tabNumEntries));
-//               int gmem_start_o = o_tab_size * omp_get_team_num();
-//               convertToSingleWithOffset(RTEnvd.oTable, opts[j].ptr, access_idx+gmem_start_o, i,
-//                                         (ApproxType) out_reg[j].data_type);
-
-//             }
-//           offset += opts[j].num_elem;
-//         }
-//       }
-//     }
-
-//   // race condition between writer thread that has max dist and other threads
-//   syncThreadsAligned();
-//   _ipt_table.copy_to(RTEnvd.iTable+gmem_start);
-// }
 #pragma omp end declare target
