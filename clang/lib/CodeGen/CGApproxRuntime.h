@@ -91,7 +91,7 @@ protected:
   ///        uint8_t dir;       // Direction of data: in/out/inout
   ///    } approx_var_info_t;
   QualType VarInfoTy;
-  llvm::Value *approxRTParams[ARG_END];
+  llvm::Value *approxRTParams[2];
   llvm::SmallVector<std::pair<Expr *, Directionality>, 16> Inputs;
   llvm::SmallVector<std::pair<Expr *, Directionality>, 16> Outputs;
   // Function type of callback functions.
@@ -148,7 +148,7 @@ class CGApproxRuntimeGPU : public CGApproxRuntime {
 private:
   CodeGenModule &CGM;
 
-  llvm::Value *approxRTParams[DEV_ARG_END];
+  llvm::Value *approxRTParams[2];
 
   // Function type of the runtime interface call.
   llvm::FunctionType *RTFnTy;
