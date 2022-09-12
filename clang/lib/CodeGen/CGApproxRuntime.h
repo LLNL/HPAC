@@ -161,8 +161,8 @@ protected:
 void CGApproxRuntimeEmitInitData(
   CodeGenFunction &CGF,
   llvm::SmallVector<std::pair<Expr *, Directionality>, 16> &Data, Address Base);
-  std::pair<Address,Address> declarePtrArrays(CodeGenFunction &CGF,
-                         llvm::SmallVector<std::pair<Expr *, Directionality>, 16> &Data, const char *ptrName);
+  Address declarePtrArrays(CodeGenFunction &CGF,
+                           llvm::SmallVector<std::pair<Expr *, Directionality>, 16> &Data, const char *ptrName);
 
 std::tuple<llvm::Value *, llvm::Value*>
 CGApproxRuntimeGPUEmitData(

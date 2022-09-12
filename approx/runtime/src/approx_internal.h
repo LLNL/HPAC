@@ -68,8 +68,8 @@ typedef struct approx_var_info_t {
 
 typedef struct approx_var_ptr_t {
   void *ptr;
-  const size_t num_elem;
-  const size_t stride;
+  size_t num_elem;
+  size_t stride;
 } approx_var_ptr_t;
 
 /* typedef struct approx_var_access_t { */

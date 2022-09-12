@@ -351,7 +351,7 @@ void CGApproxRuntimeGPU::CGApproxRuntimeEmitInitData(
   int numVars = Data.size();
   ASTContext &C = CGM.getContext();
 
-  Address VarPtrArray = BasePtr;
+  Address VarPtrArray = CGF.Builder.CreateConstArrayGEP(BasePtr, 0);
 
   const auto *VarPtrRecord = VarPtrTy->getAsRecordDecl();
   unsigned Pos = 0;
@@ -364,17 +364,17 @@ void CGApproxRuntimeGPU::CGApproxRuntimeEmitInitData(
     Directionality Dir = P.second;
     Addr = getPointer(CGF, E);
     // Store Addr
-    // this is probably wrong
     LValue Base = CGF.MakeAddrLValue(
         CGF.Builder.CreateConstGEP(VarPtrArray, Pos), VarPtrTy);
     auto *FieldT = *std::next(VarPtrRecord->field_begin(), PTR);
     LValue BaseAddrLVal = CGF.EmitLValueForField(Base, FieldT);
     CGF.EmitStoreOfScalar(CGF.Builder.CreatePtrToInt(Addr, CGF.IntPtrTy),
                           BaseAddrLVal);
+    Pos++;
   }
 }
 
-std::pair<Address,Address> CGApproxRuntimeGPU::declarePtrArrays(CodeGenFunction &CGF,
+Address CGApproxRuntimeGPU::declarePtrArrays(CodeGenFunction &CGF,
     llvm::SmallVector<std::pair<Expr *, Directionality>, 16> &Data, const char *ptrName) {
 
   int numVars = Data.size();
@@ -386,9 +386,8 @@ std::pair<Address,Address> CGApproxRuntimeGPU::declarePtrArrays(CodeGenFunction 
   VarPtrArrayTy = C.getConstantArrayType(VarPtrTy, llvm::APInt(64, numVars),
                                          nullptr, ArrayType::Normal, 0);
 
-  Address VarPtrArrayBase = CGF.CreateMemTemp(VarPtrArrayTy, ptrName);
-  Address VarPtrArrayGEP = CGF.Builder.CreateConstArrayGEP(VarPtrArray, 0);
-  return std::make_pair(VarPtrArrayBase, VarPtrArrayGEP);
+  Address VarPtrArray= CGF.CreateMemTemp(VarPtrArrayTy, ptrName);
+  return VarPtrArray;
 }
 
 std::tuple<llvm::Value *, llvm::Value*>
@@ -407,6 +406,8 @@ CGApproxRuntimeGPU::CGApproxRuntimeGPUEmitData(
   unsigned Pos = 0;
   enum VarPtrFieldID { PTR, NUM_ELEM, STRIDE };
 
+  Address VarPtrArrGEP = CGF.Builder.CreateConstArrayGEP(VarPtrArray, 0);
+
 
   for (auto P : Data) {
 
@@ -421,7 +422,7 @@ CGApproxRuntimeGPU::CGApproxRuntimeGPUEmitData(
     std::tie(Addr, NumElements, SizeOfElement, AccessStride, TypeOfElement) =
         getPointerAndSize(CGF, E);
     LValue Base = CGF.MakeAddrLValue(
-        CGF.Builder.CreateConstGEP(VarPtrArray, Pos), VarPtrTy);
+        CGF.Builder.CreateConstGEP(VarPtrArrGEP, Pos), VarPtrTy);
     // Store NUM_ELEMENTS
     LValue nElemLVal = CGF.EmitLValueForField(
         Base, *std::next(VarPtrRecord->field_begin(), NUM_ELEM));
