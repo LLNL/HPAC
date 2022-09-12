@@ -536,13 +536,13 @@ void __approx_device_memo(void (*accurateFN)(void *), void *arg, int memo_type, 
 
   // FIXME: assume inputs are the same size
 #pragma clang loop unroll(full)
-  for(int i = 0; i < 6; i++)
+  for(int i = 0; i < nInputs; i++)
     {
       i_tab_offset += ipts[i].num_elem;
     }
 
 #pragma clang loop unroll(full)
-  for(int i = 0; i < 6; i++)
+  for(int i = 0; i < nOutputs; i++)
     {
       n_output_values += opts[i].num_elem;
     }
@@ -574,8 +574,8 @@ void __approx_device_memo(void (*accurateFN)(void *), void *arg, int memo_type, 
     {
       dist_total = 0;
       offset = 0;
-#pragma clang loop unroll_count(6)
-      for(int j = 0; j < 6; j++)
+#pragma clang loop unroll(full)
+      for(int j = 0; j < nInputs; j++)
         {
           dist_total += _ipt_table.calc_distance(in_reg[j], ipts[j], ipts[j].num_elem, k, offset);
           offset += ipts[j].num_elem;
@@ -613,7 +613,7 @@ void __approx_device_memo(void (*accurateFN)(void *), void *arg, int memo_type, 
   if(entry_index != -1 && dist_total < *RTEnvd.threshold)
     {
       offset = 0;
-      for(int j = 0; j < 6; j++)
+      for(int j = 0; j < nOutputs; j++)
         {
           for(int i = 0; i < opts[j].num_elem; i++)
             {
@@ -648,7 +648,7 @@ void __approx_device_memo(void (*accurateFN)(void *), void *arg, int memo_type, 
       // NOTE: for correctness of inout, we have to copy the input before calling accurateFN
       if(have_max_dist)
         {
-          _ipt_table.add_entry(in_reg, ipts, 6);
+          _ipt_table.add_entry(in_reg, ipts, nInputs);
         }
 
       accurateFN(arg);
@@ -666,7 +666,7 @@ void __approx_device_memo(void (*accurateFN)(void *), void *arg, int memo_type, 
       if(have_max_dist)
         {
       #pragma clang loop unroll(full)
-      for(int j = 0; j < 1; j++)
+      for(int j = 0; j < nOutputs; j++)
         {
           for(size_t i = 0; i < opts[j].num_elem; i++)
             {
