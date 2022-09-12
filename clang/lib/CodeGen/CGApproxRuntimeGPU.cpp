@@ -290,6 +290,8 @@ void CGApproxRuntimeGPU::CGApproxRuntimeEnterRegion(CodeGenFunction &CGF,
   CodeGenFunction localCGF(CGM, true);
   CodeGenFunction::CGCapturedStmtRAII CapInfoRAII(localCGF, &CGSI);
   llvm::Function *Fn = localCGF.GenerateCapturedStmtFunction(CS);
+  Fn->addFnAttr(Attribute::AttrKind::AlwaysInline);
+  Fn->addFnAttr(Attribute::AttrKind::ArgMemOnly);
 
   /// Fill in parameters of runtime function call
   /// Put default values on everything.
@@ -337,8 +339,11 @@ void CGApproxRuntimeGPU::CGApproxRuntimeExitRegion(CodeGenFunction &CGF) {
 
   assert(RTFnTy != nullptr);
   if (!RTFnDev)
-    RTFnDev = Function::Create(RTFnTy, GlobalValue::ExternalLinkage, RTFnName,
-                               CGM.getModule());
+    {
+      RTFnDev = Function::Create(RTFnTy, GlobalValue::ExternalLinkage, RTFnName,
+                                 CGM.getModule());
+      RTFnDev->addFnAttr(Attribute::AttrKind::AlwaysInline);
+    }
 
   llvm::FunctionCallee RTFnCallee({RTFnTy, RTFnDev});
   CGF.EmitRuntimeCall(RTFnCallee, ArrayRef<llvm::Value *>(approxRTParams));
