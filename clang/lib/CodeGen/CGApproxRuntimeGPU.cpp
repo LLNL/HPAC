@@ -289,8 +289,8 @@ void CGApproxRuntimeGPU::CGApproxRuntimeEnterRegion(CodeGenFunction &CGF,
   CodeGenFunction localCGF(CGM, true);
   CodeGenFunction::CGCapturedStmtRAII CapInfoRAII(localCGF, &CGSI);
   llvm::Function *Fn = localCGF.GenerateCapturedStmtFunction(CS);
-  // Fn->addFnAttr(Attribute::AttrKind::AlwaysInline);
-  // Fn->addFnAttr(Attribute::AttrKind::ArgMemOnly);
+  Fn->addFnAttr(Attribute::AttrKind::AlwaysInline);
+  Fn->addFnAttr(Attribute::AttrKind::ArgMemOnly);
 
   /// Fill in parameters of runtime function call
   /// Put default values on everything.
