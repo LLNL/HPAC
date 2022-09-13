@@ -66,16 +66,16 @@ typedef struct approx_var_info_t {
   uint8_t dir;
 } approx_var_info_t;
 
-typedef struct approx_var_ptr_t {
-  void *ptr;
-  size_t num_elem;
-  size_t stride;
-} approx_var_ptr_t;
+/* typedef struct approx_var_ptr_t { */
+/*   void *ptr; */
+/*   size_t num_elem; */
+/*   size_t stride; */
+/* } approx_var_ptr_t; */
 
-/* typedef struct approx_var_access_t { */
-/*   const size_t num_elem; */
-/*   const size_t stride; */
-/* } approx_var_access_t; */
+typedef struct approx_var_access_t {
+  const size_t num_elem;
+  const size_t stride;
+} approx_var_access_t;
 
 
 typedef struct approx_region_specification {

@@ -53,9 +53,11 @@ enum DevApproxRTArgsIndex : uint {
   DevCapDataPtr,
   DevMemoDescr,
   DevDataDescIn,
+  DevAccessDescIn,
   DevDataPtrIn,
   DevDataSizeIn,
   DevDataDescOut,
+  DevAccessDescOut,
   DevDataPtrOut,
   DevDataSizeOut,
   DEV_ARG_END
@@ -117,11 +119,11 @@ protected:
   QualType VarRegionSpecTy;
 
 
-  /// VarPtrTy is a struct containing the pointer to a thread's input
+  /// VarAccessTy is a struct containing the pointer to a thread's input
   /// typedef struct approx_var_ptr_t {
   ///   void *ptr;
   /// } approx_var_ptr_t;
-  QualType VarPtrTy;
+  QualType VarAccessTy;
 
   void CGApproxRuntimeEmitPerfoFn(CapturedStmt &CS, const ApproxLoopHelperExprs &LoopExprs, const ApproxPerfoClause &PC);
   virtual std::pair<llvm::Value *, llvm::Value *> CGApproxRuntimeEmitData(CodeGenFunction &CGF, llvm::SmallVector<std::pair<Expr *, Directionality>, 16> &Data, const char *arrayName);
@@ -161,8 +163,11 @@ protected:
 void CGApproxRuntimeEmitInitData(
   CodeGenFunction &CGF,
   llvm::SmallVector<std::pair<Expr *, Directionality>, 16> &Data, Address Base);
+  Address declareAccessArrays(CodeGenFunction &CGF,
+                           llvm::SmallVector<std::pair<Expr *, Directionality>, 16> &Data, const char *name);
   Address declarePtrArrays(CodeGenFunction &CGF,
-                           llvm::SmallVector<std::pair<Expr *, Directionality>, 16> &Data, const char *ptrName);
+                           llvm::SmallVector<std::pair<Expr *, Directionality>, 16> &Data, const char *name);
+
 
 std::tuple<llvm::Value *, llvm::Value*>
 CGApproxRuntimeGPUEmitData(
@@ -172,7 +177,7 @@ CGApproxRuntimeGPUEmitData(
 
 
   void getVarInfoType(ASTContext &C, QualType &VarInfoTy) override;
-  void getVarPtrType(ASTContext &C, QualType &VarInfoTy);
+  void getVarAccessType(ASTContext &C, QualType &VarInfoTy);
 public:
   CGApproxRuntimeGPU(CodeGenModule &CGM);
   ~CGApproxRuntimeGPU() = default;

@@ -165,7 +165,7 @@ void convertTo(T *dest, void *src, size_t numElements,
 
 #pragma omp declare target
 template<typename T>
-void convertToSingleWithOffset(T *dest, void *src, size_t dest_offset,
+void convertToSingleWithOffset(T *dest, const void *src, size_t dest_offset,
                                size_t src_offset, ApproxType Type){
     switch (Type) {
 #define APPROX_TYPE(Enum, CType, nameOfType)                                   \
@@ -179,7 +179,7 @@ void convertToSingleWithOffset(T *dest, void *src, size_t dest_offset,
 }
 
 template<typename T>
-void convertFromSingleWithOffset(void *dest, T *src, size_t dest_offset,
+void convertFromSingleWithOffset(void *dest, const T *src, size_t dest_offset,
                                size_t src_offset, ApproxType Type){
     switch (Type) {
 #define APPROX_TYPE(Enum, CType, nameOfType)                                   \

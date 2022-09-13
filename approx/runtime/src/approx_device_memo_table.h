@@ -61,7 +61,7 @@ private:
         }
     }
 
-  ValType calc_distance(const approx_region_specification &rs, const approx_var_ptr_t &input, int size, int entry, int offset)
+  ValType calc_distance(const approx_region_specification &rs, const approx_var_access_t &input_a, const void *ipt_ptr, int size, int entry, int offset)
     {
         int tid_in_block = omp_get_thread_num();
         int tid_in_warp = tid_in_block % NTHREADS_PER_WARP;
@@ -77,7 +77,7 @@ private:
             int column_number = table_number;
             int access_idx = (row_number * tables_per_block) + table_number;
             real_t in_val_conv = 0;
-            convertToSingleWithOffset(&in_val_conv, input.ptr, 0, i*input.stride, (ApproxType) rs.data_type);
+            convertToSingleWithOffset(&in_val_conv, ipt_ptr, 0, i*input_a.stride, (ApproxType) rs.data_type);
             real_t dist = 0;
             if(table[access_idx] != 0)
               dist = fabs(table[access_idx] - in_val_conv) / table[access_idx];
@@ -208,14 +208,14 @@ private:
   }
 
 
-  void add_entry(const approx_region_specification *rs, const approx_var_ptr_t *inputs, int nInputs)
+  void add_entry(const approx_region_specification *rs, const approx_var_access_t *input_a, const void **inputs, int nInputs)
   {
     int idx_offset = 0;
     int offset = 0;
     int entry_index = getInsertionIdx();
     for(int j = 0; j < nInputs; j++)
       {
-        for(int i = 0; i < inputs[j].num_elem; i++)
+        for(int i = 0; i < input_a[j].num_elem; i++)
           {
             int tid_in_block = omp_get_thread_num();
             int tid_in_warp = tid_in_block % NTHREADS_PER_WARP;
@@ -231,12 +231,12 @@ private:
             row_number = entry_index * num_items_per_entry + offset + i;
             access_idx = (row_number * tables_per_block) + table_number;
 
-            convertToSingleWithOffset(table, inputs[j].ptr, access_idx, i*inputs[j].stride,
+            convertToSingleWithOffset(table, inputs[j], access_idx, i*input_a[j].stride,
                                       (ApproxType) rs[j].data_type);
 
             idx_offset = tables_per_block * omp_get_team_num() + table_number;
           }
-        offset += inputs[j].num_elem;
+        offset += input_a[j].num_elem;
       }
 
     InputIdx[idx_offset] = std::min(num_entries, InputIdx[idx_offset]+1);

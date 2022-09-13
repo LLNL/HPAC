@@ -222,23 +222,20 @@ void CGApproxRuntimeGPU::getVarInfoType(ASTContext &C, QualType &VarRegionTy) {
   return;
 }
 
-void CGApproxRuntimeGPU::getVarPtrType(ASTContext &C, QualType &VarInfoTy) {
+void CGApproxRuntimeGPU::getVarAccessType(ASTContext &C, QualType &VarInfoTy) {
   if (VarInfoTy.isNull()) {
-    RecordDecl *VarPtrRD = C.buildImplicitRecord("approx_var_ptr_t");
+    RecordDecl *VarAccessRD = C.buildImplicitRecord("approx_var_access_t");
     QualType SizeOfType = C.getSizeType();
     SizeOfType = C.getCanonicalType(SizeOfType).withConst();
-    VarPtrRD->startDefinition();
-
-
+    VarAccessRD->startDefinition();
     /// Void pointer pointing to data values
-    addFieldToRecordDecl(C, VarPtrRD, C.getIntPtrType());
-
+    // addFieldToRecordDecl(C, VarAccessRD, C.getIntPtrType());
     // /// number of elements
-    addFieldToRecordDecl(C, VarPtrRD, SizeOfType);
+    addFieldToRecordDecl(C, VarAccessRD, SizeOfType);
     // /// stride of access
-    addFieldToRecordDecl(C, VarPtrRD, SizeOfType);
-    VarPtrRD->completeDefinition();
-    VarInfoTy = C.getRecordType(VarPtrRD);
+    addFieldToRecordDecl(C, VarAccessRD, SizeOfType);
+    VarAccessRD->completeDefinition();
+    VarInfoTy = C.getRecordType(VarAccessRD);
   }
   return;
 }
@@ -255,9 +252,11 @@ CGApproxRuntimeGPU::CGApproxRuntimeGPU(CodeGenModule &CGM)
                                            /* Captured data ptr*/ CGM.VoidPtrTy,
                                            /* Memoization Type */ CGM.Int32Ty,
                                            /* Input Data Descr. */ CGM.VoidPtrTy,
+                                           /* Input Access Descr. */ CGM.VoidPtrTy,
                                            /* Input Data Pointers. */ CGM.VoidPtrTy,
                                            /* Input Data Num Elements */ CGM.Int32Ty,
                                            /* Output Data Descr. */ CGM.VoidPtrTy,
+                                           /* Output Access Descr. */ CGM.VoidPtrTy,
                                            /* Output Data Pointers. */ CGM.VoidPtrTy,
                                            /* Output Data Num Elements */ CGM.Int32Ty
                                          },
@@ -279,7 +278,7 @@ void CGApproxRuntimeGPU::CGApproxRuntimeEnterRegion(CodeGenFunction &CGF,
       llvm::PointerType::getUnqual(Types.ConvertType(C.CharTy));
   /// Reset All info of the Runtime "state machine"
   getVarInfoType(C, VarRegionSpecTy);
-  getVarPtrType(C, VarPtrTy);
+  getVarAccessType(C, VarAccessTy);
   Inputs.clear();
   Outputs.clear();
   for (unsigned i = DEV_ARG_START; i < DEV_ARG_END; i++)
@@ -290,8 +289,8 @@ void CGApproxRuntimeGPU::CGApproxRuntimeEnterRegion(CodeGenFunction &CGF,
   CodeGenFunction localCGF(CGM, true);
   CodeGenFunction::CGCapturedStmtRAII CapInfoRAII(localCGF, &CGSI);
   llvm::Function *Fn = localCGF.GenerateCapturedStmtFunction(CS);
-  Fn->addFnAttr(Attribute::AttrKind::AlwaysInline);
-  Fn->addFnAttr(Attribute::AttrKind::ArgMemOnly);
+  // Fn->addFnAttr(Attribute::AttrKind::AlwaysInline);
+  // Fn->addFnAttr(Attribute::AttrKind::ArgMemOnly);
 
   /// Fill in parameters of runtime function call
   /// Put default values on everything.
@@ -301,9 +300,11 @@ void CGApproxRuntimeGPU::CGApproxRuntimeEnterRegion(CodeGenFunction &CGF,
   approxRTParams[DevCapDataPtr] =
       CGF.Builder.CreatePointerCast(CapStructAddr.getPointer(), CGM.VoidPtrTy);
   approxRTParams[DevDataDescIn] = llvm::ConstantPointerNull::get(CGM.VoidPtrTy);
+  approxRTParams[DevAccessDescIn] = llvm::ConstantPointerNull::get(CGM.VoidPtrTy);
   approxRTParams[DevDataSizeIn] =
       llvm::ConstantInt::get(CGF.Builder.getInt32Ty(), 0);
   approxRTParams[DevDataDescOut] = llvm::ConstantPointerNull::get(CGM.VoidPtrTy);
+  approxRTParams[DevAccessDescOut] = llvm::ConstantPointerNull::get(CGM.VoidPtrTy);
   approxRTParams[DevDataSizeOut] =
       llvm::ConstantInt::get(CGF.Builder.getInt32Ty(), 0);
   approxRTParams[DevMemoDescr] =
@@ -356,44 +357,52 @@ void CGApproxRuntimeGPU::CGApproxRuntimeEmitInitData(
   int numVars = Data.size();
   ASTContext &C = CGM.getContext();
 
-  Address VarPtrArray = CGF.Builder.CreateConstArrayGEP(BasePtr, 0);
-
-  const auto *VarPtrRecord = VarPtrTy->getAsRecordDecl();
+  // Address VarPtrArray = CGF.Builder.CreateConstArrayGEP(BasePtr, 0);
   unsigned Pos = 0;
-  enum VarPtrFieldID { PTR, NUM_ELEM, STRIDE };
+  enum VarPtrFieldID { NUM_ELEM, STRIDE };
 
   for (auto P : Data) {
-    llvm::SmallVector<llvm::Constant*, 3> SpecInit;
     llvm::Value *Addr;
     Expr *E = P.first;
     Directionality Dir = P.second;
     Addr = getPointer(CGF, E);
     // Store Addr
     LValue Base = CGF.MakeAddrLValue(
-        CGF.Builder.CreateConstGEP(VarPtrArray, Pos), VarPtrTy);
-    auto *FieldT = *std::next(VarPtrRecord->field_begin(), PTR);
-    LValue BaseAddrLVal = CGF.EmitLValueForField(Base, FieldT);
+        CGF.Builder.CreateConstArrayGEP(BasePtr, Pos), C.VoidPtrTy);
     CGF.EmitStoreOfScalar(CGF.Builder.CreatePtrToInt(Addr, CGF.IntPtrTy),
-                          BaseAddrLVal);
+                          Base);
     Pos++;
   }
 }
 
-Address CGApproxRuntimeGPU::declarePtrArrays(CodeGenFunction &CGF,
-    llvm::SmallVector<std::pair<Expr *, Directionality>, 16> &Data, const char *ptrName) {
+Address CGApproxRuntimeGPU::declareAccessArrays(CodeGenFunction &CGF,
+    llvm::SmallVector<std::pair<Expr *, Directionality>, 16> &Data, const char *name) {
 
   int numVars = Data.size();
   ASTContext &C = CGM.getContext();
-  QualType VarPtrArrayTy;
-  llvm::Value *NumOfElements =
-      llvm::ConstantInt::get(CGM.Int32Ty, numVars, false);
+  QualType VarAccessArrayTy;
 
-  VarPtrArrayTy = C.getConstantArrayType(VarPtrTy, llvm::APInt(64, numVars),
+  VarAccessArrayTy = C.getConstantArrayType(VarAccessTy, llvm::APInt(64, numVars),
                                          nullptr, ArrayType::Normal, 0);
 
-  Address VarPtrArray= CGF.CreateMemTemp(VarPtrArrayTy, ptrName);
+  Address VarAccessArray = CGF.CreateMemTemp(VarAccessArrayTy, name);
+  return VarAccessArray;
+}
+
+Address CGApproxRuntimeGPU::declarePtrArrays(CodeGenFunction &CGF,
+    llvm::SmallVector<std::pair<Expr *, Directionality>, 16> &Data, const char *name) {
+
+  int numVars = Data.size();
+  QualType VarPtrArrayTy;
+  ASTContext &C = CGM.getContext();
+
+  VarPtrArrayTy = C.getConstantArrayType(C.VoidPtrTy, llvm::APInt(64, numVars),
+                                         nullptr, ArrayType::Normal, 0);
+
+  Address VarPtrArray = CGF.CreateMemTemp(VarPtrArrayTy, name);
   return VarPtrArray;
 }
+
 
 std::tuple<llvm::Value *, llvm::Value*>
 CGApproxRuntimeGPU::CGApproxRuntimeGPUEmitData(
@@ -407,9 +416,9 @@ CGApproxRuntimeGPU::CGApproxRuntimeGPUEmitData(
 
   std::vector<llvm::SmallVector<llvm::Constant*,3>> RegionSpecInit;
   const auto *VarInfoRecord = VarRegionSpecTy->getAsRecordDecl();
-  const auto *VarPtrRecord = VarPtrTy->getAsRecordDecl();
+  const auto *VarPtrRecord = VarAccessTy->getAsRecordDecl();
   unsigned Pos = 0;
-  enum VarPtrFieldID { PTR, NUM_ELEM, STRIDE };
+  enum VarPtrFieldID { NUM_ELEM, STRIDE };
 
   Address VarPtrArrGEP = CGF.Builder.CreateConstArrayGEP(VarPtrArray, 0);
 
@@ -427,7 +436,7 @@ CGApproxRuntimeGPU::CGApproxRuntimeGPUEmitData(
     std::tie(Addr, NumElements, SizeOfElement, AccessStride, TypeOfElement) =
         getPointerAndSize(CGF, E);
     LValue Base = CGF.MakeAddrLValue(
-        CGF.Builder.CreateConstGEP(VarPtrArrGEP, Pos), VarPtrTy);
+        CGF.Builder.CreateConstGEP(VarPtrArrGEP, Pos), VarAccessTy);
     // Store NUM_ELEMENTS
     LValue nElemLVal = CGF.EmitLValueForField(
         Base, *std::next(VarPtrRecord->field_begin(), NUM_ELEM));
@@ -502,17 +511,26 @@ void CGApproxRuntimeGPU::CGApproxRuntimeEmitDataValues(CodeGenFunction &CGF) {
   Address ArrayIptBase{nullptr, nullptr, CharUnits::Zero()};
   Address ArrayOptBase{nullptr, nullptr, CharUnits::Zero()};
 
+  Address ArrayIptPtrBase{nullptr, nullptr, CharUnits::Zero()};
+  Address ArrayOptPtrBase{nullptr, nullptr, CharUnits::Zero()};
+
  CGF.EmitBlock(CheckBody);
 
   if(requiresInputs && Inputs.size() > 0)
     {
-      sprintf(namePtr, ".dep.approx_ipt_ptrs.arr.addr_%d", input_arrays);
-      ArrayIptBase = declarePtrArrays(CGF, Inputs, namePtr);
+      sprintf(namePtr, ".dep.approx_ipt_access.arr.addr_%d", input_arrays);
+      ArrayIptBase = declareAccessArrays(CGF, Inputs, namePtr);
 
+      sprintf(namePtr, ".dep.approx_ipt_ptr.arr.addr_%d", input_arrays);
+      ArrayIptPtrBase = declarePtrArrays(CGF, Inputs, namePtr);
     }
 
-  sprintf(namePtr, ".dep.approx_opt_ptrs.arr.addr_%d", output_arrays);
-  ArrayOptBase = declarePtrArrays(CGF, Outputs, namePtr);
+  sprintf(namePtr, ".dep.approx_opt_access.arr.addr_%d", output_arrays);
+  ArrayOptBase = declareAccessArrays(CGF, Outputs, namePtr);
+
+  sprintf(namePtr, ".dep.approx_opt_ptr.arr.addr_%d", output_arrays);
+  ArrayOptPtrBase = declarePtrArrays(CGF, Outputs, namePtr);
+
   llvm::Value *InitCheckValue = CGF.EmitLoadOfScalar(InitCheck, false, BoolTy, SourceLocation());
 
   llvm::BasicBlock *StoreBody = CGF.createBasicBlock("approx.init_vars");
@@ -529,7 +547,8 @@ void CGApproxRuntimeGPU::CGApproxRuntimeEmitDataValues(CodeGenFunction &CGF) {
     std::tie(NumOfElements, InfoAddress) =
       CGApproxRuntimeGPUEmitData(CGF, Inputs, ArrayIptBase, nameInfo);
     approxRTParams[DevDataDescIn] = InfoAddress;
-    approxRTParams[DevDataPtrIn] = CGF.Builder.CreatePointerBitCastOrAddrSpaceCast(
+    approxRTParams[DevDataPtrIn] = CGF.Builder.CreatePointerBitCastOrAddrSpaceCast(ArrayIptPtrBase.getPointer(), CGF.VoidPtrTy); //(??)
+    approxRTParams[DevAccessDescIn] = CGF.Builder.CreatePointerBitCastOrAddrSpaceCast(
                             ArrayIptBase.getPointer(), CGF.VoidPtrTy);
     approxRTParams[DevDataSizeIn] = NumOfElements;
   }
@@ -539,7 +558,8 @@ void CGApproxRuntimeGPU::CGApproxRuntimeEmitDataValues(CodeGenFunction &CGF) {
   std::tie(NumOfElements, InfoAddress) =
     CGApproxRuntimeGPUEmitData(CGF, Outputs, ArrayOptBase, nameInfo);
   approxRTParams[DevDataDescOut] = InfoAddress;
-  approxRTParams[DevDataPtrOut] = CGF.Builder.CreatePointerBitCastOrAddrSpaceCast(ArrayOptBase.getPointer(), CGF.VoidPtrTy);
+  approxRTParams[DevAccessDescOut] = CGF.Builder.CreatePointerBitCastOrAddrSpaceCast(ArrayOptBase.getPointer(), CGF.VoidPtrTy);
+  approxRTParams[DevDataPtrOut] = CGF.Builder.CreatePointerBitCastOrAddrSpaceCast(ArrayOptPtrBase.getPointer(), CGF.VoidPtrTy); // (??)
   approxRTParams[DevDataSizeOut] = NumOfElements;
 
   // now the metadata have been written once, but we need to write the
@@ -548,7 +568,7 @@ void CGApproxRuntimeGPU::CGApproxRuntimeEmitDataValues(CodeGenFunction &CGF) {
   CGF.EmitBlock(ContinueBody);
 
   if(requiresInputs && Inputs.size() > 0) {
-    CGApproxRuntimeEmitInitData(CGF, Inputs, ArrayIptBase);
+    CGApproxRuntimeEmitInitData(CGF, Inputs, ArrayIptPtrBase);
   }
-  CGApproxRuntimeEmitInitData(CGF, Outputs, ArrayOptBase);
+  CGApproxRuntimeEmitInitData(CGF, Outputs, ArrayOptPtrBase);
 }
