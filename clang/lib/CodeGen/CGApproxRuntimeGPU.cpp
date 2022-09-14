@@ -22,6 +22,7 @@
 #include "llvm/Support/Debug.h"
 #include "CGOpenMPRuntime.h"
 #include <tuple>
+#include "CGOpenMPRuntimeGPU.h"
 
 using namespace llvm;
 using namespace clang;
@@ -380,13 +381,38 @@ Address CGApproxRuntimeGPU::declareAccessArrays(CodeGenFunction &CGF,
 
   int numVars = Data.size();
   ASTContext &C = CGM.getContext();
-  QualType VarAccessArrayTy;
+  // QualType VarAccessArrayTy;
 
-  VarAccessArrayTy = C.getConstantArrayType(VarAccessTy, llvm::APInt(64, numVars),
-                                         nullptr, ArrayType::Normal, 0);
+  // VarAccessArrayTy = C.getConstantArrayType(VarAccessTy, llvm::APInt(64, numVars),
+  //                                        nullptr, ArrayType::Normal, 0);
 
-  Address VarAccessArray = CGF.CreateMemTemp(VarAccessArrayTy, name);
-  return VarAccessArray;
+  llvm::SmallVector<llvm::Type*, 3> AITypes{CGF.SizeTy, CGF.SizeTy};
+  llvm::StructType *AccessInfoStructTy = llvm::StructType::get(CGM.getLLVMContext(),
+                                                               AITypes);
+  AccessInfoStructTy->setName("approx_var_access_t");
+  llvm::ArrayType *AccessStArrTy = llvm::ArrayType::get(AccessInfoStructTy, numVars);
+
+  QualType VarPtrArrayTy = C.getConstantArrayType(VarAccessTy, llvm::APInt(64, numVars),
+                                          nullptr, ArrayType::Normal, 0);
+  llvm::Type *MemType = CGF.ConvertTypeForMem(VarPtrArrayTy);
+  auto *RD = VarPtrArrayTy->getAsRecordDecl();
+
+  // Leak, but who cares
+  AccessInfo = new GlobalVariable(CGM.getModule(), MemType, false, GlobalValue::InternalLinkage,
+                                  llvm::Constant::getNullValue(MemType),
+                                  name,
+                                  /*InsertBefore=*/ nullptr,
+                                  /*ThreadLocalMode=*/ GlobalValue::NotThreadLocal,
+                                  // how do we do this better?
+                                  Optional<unsigned>((unsigned) 3)
+                                  );
+
+  return Address(
+                 CGF.Builder.CreatePointerBitCastOrAddrSpaceCast(
+                 AccessInfo, MemType->getPointerTo(CGM.getContext().getTargetAddressSpace(clang::LangAS::cuda_shared))),
+                 MemType, CharUnits::fromQuantity(8));
+  // Address VarAccessArray = CGF.CreateMemTemp(VarAccessArrayTy, name);
+  // return VarAccessArray;
 }
 
 Address CGApproxRuntimeGPU::declarePtrArrays(CodeGenFunction &CGF,
@@ -503,9 +529,14 @@ void CGApproxRuntimeGPU::CGApproxRuntimeEmitDataValues(CodeGenFunction &CGF) {
   ASTContext &C = CGM.getContext();
   QualType BoolTy = C.getIntTypeForBitwidth(8, false);
   // any way to have actual bool?
-  Address InitCheck = CGM.getOpenMPRuntime().ApproxInitCheck;
+  auto &OMPRT = static_cast<CGOpenMPRuntimeGPU &>(CGF.CGM.getOpenMPRuntime());
+  Address InitCheck = OMPRT.ApproxInitCheck;
 
   llvm::BasicBlock *CheckBody = CGF.createBasicBlock("approx.check_init");
+  llvm::BasicBlock *StoreBody = CGF.createBasicBlock("approx.init_vars");
+  llvm::BasicBlock *ContinueBody = CGF.createBasicBlock("approx.continue");
+  llvm::BasicBlock *StoreVals = CGF.createBasicBlock("approx.store_access_vars");
+  llvm::BasicBlock *Synchronize = CGF.createBasicBlock("approx.sync_after_store");
   CGF.EmitBranch(CheckBody);
 
   Address ArrayIptBase{nullptr, nullptr, CharUnits::Zero()};
@@ -533,13 +564,17 @@ void CGApproxRuntimeGPU::CGApproxRuntimeEmitDataValues(CodeGenFunction &CGF) {
 
   llvm::Value *InitCheckValue = CGF.EmitLoadOfScalar(InitCheck, false, BoolTy, SourceLocation());
 
-  llvm::BasicBlock *StoreBody = CGF.createBasicBlock("approx.init_vars");
-  llvm::BasicBlock *ContinueBody = CGF.createBasicBlock("approx.continue");
   llvm::Value *InitDone = CGF.Builder.CreateICmpEQ(InitCheckValue, llvm::ConstantInt::get(CGF.Int8Ty, 1));
   CGF.Builder.CreateCondBr(InitDone, ContinueBody, StoreBody);
 
   CGF.EmitBlock(StoreBody);
   CGF.EmitStoreOfScalar(llvm::ConstantInt::get(CGF.Int8Ty, 1, false), InitCheck, false, BoolTy, AlignmentSource::Type, false, false);
+
+  llvm::Value *ThreadID = OMPRT.getGPUThreadID(CGF);
+  llvm::Value *AmFirstThreadInBlock = CGF.Builder.CreateICmpEQ(ThreadID, llvm::ConstantInt::get(CGF.IntTy, 0));
+  CGF.Builder.CreateCondBr(AmFirstThreadInBlock, StoreVals, Synchronize);
+
+  CGF.EmitBlock(StoreVals);
 
   llvm::Value *NumOfElements, *InfoAddress, *PtrAddress;
   if (requiresInputs && Inputs.size() > 0) {
@@ -547,7 +582,7 @@ void CGApproxRuntimeGPU::CGApproxRuntimeEmitDataValues(CodeGenFunction &CGF) {
     std::tie(NumOfElements, InfoAddress) =
       CGApproxRuntimeGPUEmitData(CGF, Inputs, ArrayIptBase, nameInfo);
     approxRTParams[DevDataDescIn] = InfoAddress;
-    approxRTParams[DevDataPtrIn] = CGF.Builder.CreatePointerBitCastOrAddrSpaceCast(ArrayIptPtrBase.getPointer(), CGF.VoidPtrTy); //(??)
+    approxRTParams[DevDataPtrIn] = CGF.Builder.CreatePointerBitCastOrAddrSpaceCast(ArrayIptPtrBase.getPointer(), CGF.VoidPtrTy);
     approxRTParams[DevAccessDescIn] = CGF.Builder.CreatePointerBitCastOrAddrSpaceCast(
                             ArrayIptBase.getPointer(), CGF.VoidPtrTy);
     approxRTParams[DevDataSizeIn] = NumOfElements;
@@ -559,8 +594,12 @@ void CGApproxRuntimeGPU::CGApproxRuntimeEmitDataValues(CodeGenFunction &CGF) {
     CGApproxRuntimeGPUEmitData(CGF, Outputs, ArrayOptBase, nameInfo);
   approxRTParams[DevDataDescOut] = InfoAddress;
   approxRTParams[DevAccessDescOut] = CGF.Builder.CreatePointerBitCastOrAddrSpaceCast(ArrayOptBase.getPointer(), CGF.VoidPtrTy);
-  approxRTParams[DevDataPtrOut] = CGF.Builder.CreatePointerBitCastOrAddrSpaceCast(ArrayOptPtrBase.getPointer(), CGF.VoidPtrTy); // (??)
+  approxRTParams[DevDataPtrOut] = CGF.Builder.CreatePointerBitCastOrAddrSpaceCast(ArrayOptPtrBase.getPointer(), CGF.VoidPtrTy);
   approxRTParams[DevDataSizeOut] = NumOfElements;
+
+  CGF.EmitBranch(Synchronize);
+  CGF.EmitBlock(Synchronize);
+  OMPRT.syncCTAThreads(CGF);
 
   // now the metadata have been written once, but we need to write the
   // pointer in the ContinueBody because it will be different each iteration

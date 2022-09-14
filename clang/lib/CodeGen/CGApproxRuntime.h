@@ -156,6 +156,7 @@ private:
   llvm::FunctionType *RTFnTy;
 
   llvm::GlobalVariable *RegionInfo;
+  llvm::GlobalVariable *AccessInfo;
 
 protected:
   using CGApproxRuntime::CGApproxRuntimeEmitData;

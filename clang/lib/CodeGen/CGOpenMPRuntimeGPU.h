@@ -43,7 +43,9 @@ private:
   ExecutionMode getExecutionMode() const;
 
   /// Get barrier to synchronize all threads in a block.
+public:
   void syncCTAThreads(CodeGenFunction &CGF);
+private:
 
   /// Helper for target directive initialization.
   void emitKernelInit(CodeGenFunction &CGF, EntryFunctionState &EST,
