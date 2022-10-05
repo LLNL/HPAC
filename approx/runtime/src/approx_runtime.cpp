@@ -1,4 +1,4 @@
-//===--- approx_runtime.cpp - driver of approximate runtime system----------------------===//
+//===--t approx_runtime.cpp - driver of approximate runtime system----------------------===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -63,6 +63,63 @@ struct ApproxRuntimeDevMetadata
 };
 
 #pragma omp declare target
+#define ACCURATE 0
+#define APPROX 1
+
+class ApproxRuntimeDevDataOutputEnv
+{
+public:
+  char *states = nullptr;
+  char *predicted_values = nullptr;
+  int *pSize = nullptr;
+  real_t *oTable = nullptr;
+  real_t *threshold = nullptr;
+  int *history_size = nullptr;
+  char *active_values = nullptr;
+  char *cur_index = nullptr;
+
+#pragma omp end declare target
+
+  void resetTable(float _threshold, int _total_output_size, int _pSize, int _history_size, int _num_blocks, int _nthreads)
+  {
+    destruct();
+    int total_nthreads = _num_blocks * _nthreads;
+    states = new char[total_nthreads];
+    predicted_values = new char[total_nthreads];
+    pSize = new int[1];
+    oTable = new real_t[total_nthreads * _total_output_size * _history_size];
+    threshold = new real_t[1];
+    history_size = new int[1];
+    active_values = new char[total_nthreads];
+    cur_index = new char[total_nthreads];
+
+    pSize[0] = _pSize;
+    history_size[0] = _history_size;
+    threshold[0] = _threshold;
+
+    std::fill(states, states+total_nthreads, 0);
+    std::fill(predicted_values, predicted_values+total_nthreads, 0);
+    std::fill(oTable, oTable+(total_nthreads * _total_output_size * _history_size), 0);
+    std::fill(active_values, active_values+total_nthreads, 0);
+    std::fill(cur_index, cur_index+total_nthreads, 0);
+
+  }
+
+  void destruct()
+  {
+    delete[] states;
+    delete[] predicted_values;
+    delete[] pSize;
+    delete[] oTable;
+    delete[] threshold;
+    delete[] history_size;
+    delete[] active_values;
+    delete[] cur_index;
+  }
+
+#pragma omp begin declare target
+};
+
 
 class ApproxRuntimeDevDataEnv{
 
@@ -84,6 +141,7 @@ public:
   ApproxRuntimeDevDataEnv() = default;
 
 #pragma omp end declare target
+
   void resetTable(float _threshold, int total_input_size, int total_output_size, int total_num_tables, int replacement_data_size, int num_blocks, int _numTableEntries, int _nthreads, ApproxRuntimeDevMetadata& RTMeta, TableReplacementPolicy RP){
     // we want to have at least one 8-bit integer per table
     destruct();
@@ -144,7 +202,9 @@ public:
 };
 
 ApproxRuntimeDevDataEnv RTEnvd = ApproxRuntimeDevDataEnv();
+ApproxRuntimeDevDataOutputEnv RTEnvdOpt = ApproxRuntimeDevDataOutputEnv();
 ApproxRuntimeDevMetadata RTMeta = ApproxRuntimeDevMetadata();
+static bool output_mapped = false;
 #pragma omp end declare target
 
 void resetDeviceTable(float thresh, int threads_per_block, int num_blocks, int num_input_items_per_entry, int num_output_items_per_entry, int num_tab_entries, int num_threads, TableReplacementPolicy RP){
@@ -186,6 +246,25 @@ void resetDeviceTable(float thresh, int threads_per_block, int num_blocks, int n
   #else
 #pragma omp target enter data map(to:RTEnvd, RTEnvd.threshold[0:1], RTEnvd.tabNumEntries[0:1], RTEnvd.inputIdx[0:total_num_tables], RTEnvd.ReplacementData[0:replacement_data_size], RTEnvd.ClockIndexes[0:clock_data_size], RTEnvd.iTable[0:total_input_size], RTEnvd.oTable[0:total_output_size], RTEnvd.TableRP[0:1])
   #endif // APPROX_DEV_STATS
+
+#pragma omp target update from(RTEnvd.threshold[0:1])
+}
+
+void resetDeviceOutputTable(float thresh, int num_output_items_per_entry, int pSize, int history_size, int num_blocks, int num_threads)
+{
+  int nthreads = num_threads * num_blocks;
+  int gtab_size = nthreads * num_output_items_per_entry * history_size;
+  if(output_mapped)
+    {
+      // TODO: nthreads can be different here as well
+      int del_gtab_size = nthreads * num_output_items_per_entry * *RTEnvdOpt.history_size;
+#pragma omp target exit data map(delete:RTEnvdOpt, RTEnvdOpt.states[0:nthreads], RTEnvdOpt.predicted_values[0:nthreads], RTEnvdOpt.pSize[0:1], RTEnvdOpt.oTable[0:del_gtab_size], RTEnvdOpt.threshold[0:1], RTEnvdOpt.history_size[0:1], RTEnvdOpt.active_values[0:nthreads], RTEnvdOpt.cur_index[0:nthreads])
+    }
+
+  RTEnvdOpt.resetTable(thresh, num_output_items_per_entry, pSize, history_size, num_blocks, num_threads);
+#pragma omp target enter data map(to:RTEnvdOpt, RTEnvdOpt.states[0:nthreads], RTEnvdOpt.predicted_values[0:nthreads], RTEnvdOpt.pSize[0:1], RTEnvdOpt.oTable[0:gtab_size], RTEnvdOpt.threshold[0:1], RTEnvdOpt.history_size[0:1], RTEnvdOpt.active_values[0:nthreads], RTEnvdOpt.cur_index[0:nthreads])
+
+  output_mapped = true;
 }
 
   int getNThreadsPerWarp()
@@ -281,8 +360,8 @@ public:
   int inputSize;
   int outputSize;
   float threshold;
-  int historySize;
-  int predictionSize;
+  int historySize = -1;
+  int predictionSize = -1;
   int perfoStep;
   float perfoRate;
   float *randomNumbers;
@@ -393,7 +472,14 @@ public:
     printf("WARNING: HPAC will collect per-thread approximation statistics for %d threads, affecting runtime. For performance benchmarking, disable this feature\n", nThreads);
     resetDeviceTable(threshold, threadsPerBlock, numBlocks, inputSize, outputSize, tableSize, nThreads, RP);
     #else
-    resetDeviceTable(threshold, threadsPerBlock, numBlocks, inputSize, outputSize, tableSize, numBlocks*threadsPerBlock, RP);
+    if(predictionSize == -1)
+      {
+      resetDeviceTable(threshold, threadsPerBlock, numBlocks, inputSize, outputSize, tableSize, numBlocks*threadsPerBlock, RP);
+      }
+    else
+      {
+        resetDeviceOutputTable(threshold, outputSize, predictionSize, historySize, numBlocks, threadsPerBlock);
+      }
     #endif  //APPROX_DEV_STATS
 
   }
@@ -520,9 +606,153 @@ unsigned int tnum_in_table_with_max_dist(float max_dist)
   return (firstThreadWithMax + table_number * threads_per_table) + (omp_get_num_threads() * omp_get_team_num());
 }
 
+__attribute__((always_inline))
+void __approx_device_memo_out(void (*accurateFN)(void *), void *arg, const void *region_info_out, const void *opt_access, void **outputs, const int nOutputs)
+{
+  const approx_region_specification *out_reg = (const approx_region_specification*) region_info_out;
+  approx_var_access_t *opts = (approx_var_access_t*) opt_access;
+  int tid_global = omp_get_thread_num() + omp_get_team_num() * omp_get_num_threads();
+  int entry_index = -1;
+  size_t i_tab_offset = 0;
+  int n_output_values = 0;
+  int offset = 0;
+  // we're going to use inputIdx for the state machine and output table for the outputs
+
+#pragma clang loop unroll(full)
+  for(int i = 0; i < nOutputs; i++)
+    {
+      n_output_values += opts[i].num_elem;
+    }
+
+  // Am I in the approximate state?
+  if(RTEnvdOpt.states[tid_global] == APPROX)
+    {
+      // we subtract one because 'cur_index' is the insertion point -- we want the last value inserted
+      int k = RTEnvdOpt.cur_index[tid_global] - 1;
+      if(k<0)
+        k=*(RTEnvdOpt.history_size)-1;
+      offset = 0;
+
+      for(int j = 0; j < nOutputs; j++)
+        {
+          for(int i = 0; i < opts[j].num_elem; i++)
+            {
+              int total_threads = omp_get_num_teams()*omp_get_num_threads();
+              size_t row_num = (k*n_output_values) + offset + i;
+              size_t col_num = tid_global;
+              size_t access_index = (row_num * total_threads) + col_num;
+
+              convertFromSingleWithOffset(outputs[j], RTEnvdOpt.oTable, i, access_index,
+                                        (ApproxType) out_reg[j].data_type);
+
+            }
+          offset += opts[j].num_elem;
+        }
+
+
+      if (--RTEnvdOpt.predicted_values[tid_global] == 0) {
+        RTEnvdOpt.states[tid_global] = ACCURATE;
+        RTEnvdOpt.active_values[tid_global] = 0;
+      }
+    }
+  // OK -- I'm not in the approximate state.
+  else if(RTEnvdOpt.states[tid_global] == ACCURATE) {
+    accurateFN(arg);
+
+    int k = RTEnvdOpt.cur_index[tid_global];
+    offset = 0;
+    for(int j = 0; j < nOutputs; j++)
+      {
+        for(int i = 0; i < opts[j].num_elem; i++)
+          {
+            int total_threads = omp_get_num_teams()*omp_get_num_threads();
+            size_t row_num = (k*n_output_values) + offset + i;
+            size_t col_num = tid_global;
+            size_t access_index = (row_num * total_threads) + col_num;
+
+            convertToSingleWithOffset(RTEnvdOpt.oTable, outputs[j], access_index, i,
+                                      (ApproxType) out_reg[j].data_type);
+
+          }
+        offset += opts[j].num_elem;
+      }
+    RTEnvdOpt.cur_index[tid_global] = (k+1) % (*RTEnvdOpt.history_size);
+    RTEnvdOpt.active_values[tid_global]++;
+  }
+
+  if(RTEnvdOpt.states[tid_global] == ACCURATE && RTEnvdOpt.active_values[tid_global] >= *RTEnvdOpt.history_size)
+    {
+      real_t variance = 0.0;
+      real_t avg = 0.0;
+      const int total_threads = omp_get_num_threads() * omp_get_num_teams();
+
+      for(int k = 0; k < *RTEnvdOpt.history_size; k++)
+        {
+          offset = 0;
+          for(int j = 0; j < nOutputs; j++)
+            {
+              for(int i = 0; i < opts[j].num_elem; i++)
+                {
+                  size_t row_num = (k*n_output_values) + offset + i;
+                  size_t col_num = tid_global;
+                  size_t access_index = (row_num*total_threads) + col_num;
+
+                  avg += RTEnvdOpt.oTable[access_index];
+
+                }
+              offset += opts[j].num_elem;
+            }
+        }
+
+      // average = sum / total_size
+      avg /= (real_t) (*RTEnvdOpt.history_size * n_output_values);
+
+      // for each entry in the table
+         // for each value in the entry
+            // tmp = val - avg
+            // variance += temp^2
+
+
+      for(int k = 0; k < *RTEnvdOpt.history_size; k++)
+        {
+          offset = 0;
+          for(int j = 0; j < nOutputs; j++)
+            {
+              for(int i = 0; i < opts[j].num_elem; i++)
+                {
+                  size_t row_num = (k*n_output_values) + offset + i;
+                  size_t col_num = tid_global;
+                  size_t access_index = (row_num*total_threads) + col_num;
+
+                  real_t tmp = RTEnvdOpt.oTable[access_index] - avg;
+                  variance += tmp*tmp;
+                }
+              offset += opts[j].num_elem;
+            }
+        }
+
+      // variance /= total_size
+      variance /= (real_t)(*RTEnvdOpt.history_size * n_output_values);
+
+      // stdev = sqrt(variance)
+      real_t stdev = sqrt(variance);
+      real_t rsd = stdev;
+      if(avg != 0.0f){
+        rsd = stdev / avg;
+      }
+      if(rsd < 0.0) rsd = -rsd;
+
+      if(rsd < *RTEnvdOpt.threshold)
+        {
+          // switch the machine state to approx
+          RTEnvdOpt.states[tid_global] = APPROX;
+          RTEnvdOpt.predicted_values[tid_global] = *RTEnvdOpt.pSize;
+        }
+    }
+}
 
 __attribute__((always_inline))
-void __approx_device_memo(void (*accurateFN)(void *), void *arg, int memo_type, const void *region_info_in, const void *ipt_access, const void **inputs, const int nInputs, const void *region_info_out, const void *opt_access, void **outputs, const int nOutputs)
+void __approx_device_memo_in(void (*accurateFN)(void *), void *arg, const void *region_info_in, const void *ipt_access, const void **inputs, const int nInputs, const void *region_info_out, const void *opt_access, void **outputs, const int nOutputs)
 {
   const approx_region_specification *in_reg = (const approx_region_specification*) region_info_in;
   const approx_region_specification *out_reg = (const approx_region_specification*) region_info_out;
@@ -695,5 +925,22 @@ void __approx_device_memo(void (*accurateFN)(void *), void *arg, int memo_type, 
   // race condition between writer thread that has max dist and other threads
   syncThreadsAligned();
   _ipt_table.copy_to(RTEnvd.iTable+gmem_start);
+}
+
+__attribute__((always_inline))
+void __approx_device_memo(void (*accurateFN)(void *), void *arg, int memo_type, const void *region_info_in, const void *ipt_access, const void **inputs, const int nInputs, const void *region_info_out, const void *opt_access, void **outputs, const int nOutputs)
+{
+  if(memo_type == MEMO_IN)
+    {
+      __approx_device_memo_in(accurateFN, arg, region_info_in, ipt_access, inputs, nInputs, region_info_out, opt_access, outputs, nOutputs);
+    }
+  else if(memo_type == MEMO_OUT)
+    {
+      __approx_device_memo_out(accurateFN, arg, region_info_out, opt_access, outputs, nOutputs);
+    }
+  else
+    {
+      printf("ERROR: Incorrect memo type");
+    }
 }
 #pragma omp end declare target
