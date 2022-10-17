@@ -630,7 +630,7 @@ void __approx_device_memo_out(void (*accurateFN)(void *), void *arg, const void 
       // we subtract one because 'cur_index' is the insertion point -- we want the last value inserted
       int k = RTEnvdOpt.cur_index[tid_global] - 1;
       if(k<0)
-        k=*(RTEnvdOpt.history_size)-1;
+        k=(*RTEnvdOpt.history_size)-1;
       offset = 0;
 
       for(int j = 0; j < nOutputs; j++)
