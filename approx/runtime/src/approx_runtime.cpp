@@ -75,6 +75,7 @@ public:
   real_t *oTable = nullptr;
   real_t *threshold = nullptr;
   int *history_size = nullptr;
+  int *window_size = nullptr;
   char *active_values = nullptr;
   char *cur_index = nullptr;
 
@@ -90,6 +91,7 @@ public:
     oTable = new real_t[total_nthreads * _total_output_size * _history_size];
     threshold = new real_t[1];
     history_size = new int[1];
+    window_size = new int[1];
     active_values = new char[total_nthreads];
     cur_index = new char[total_nthreads];
 
@@ -113,6 +115,7 @@ public:
     delete[] oTable;
     delete[] threshold;
     delete[] history_size;
+    delete[] window_size;
     delete[] active_values;
     delete[] cur_index;
   }
@@ -250,7 +253,7 @@ void resetDeviceTable(float thresh, int threads_per_block, int num_blocks, int n
 #pragma omp target update from(RTEnvd.threshold[0:1])
 }
 
-void resetDeviceOutputTable(float thresh, int num_output_items_per_entry, int pSize, int history_size, int num_blocks, int num_threads)
+void resetDeviceOutputTable(float thresh, int num_output_items_per_entry, int pSize, int history_size, int window_size, int num_blocks, int num_threads)
 {
   int nthreads = num_threads * num_blocks;
   int gtab_size = nthreads * num_output_items_per_entry * history_size;
@@ -258,11 +261,11 @@ void resetDeviceOutputTable(float thresh, int num_output_items_per_entry, int pS
     {
       // TODO: nthreads can be different here as well
       int del_gtab_size = nthreads * num_output_items_per_entry * *RTEnvdOpt.history_size;
-#pragma omp target exit data map(delete:RTEnvdOpt, RTEnvdOpt.states[0:nthreads], RTEnvdOpt.predicted_values[0:nthreads], RTEnvdOpt.pSize[0:1], RTEnvdOpt.oTable[0:del_gtab_size], RTEnvdOpt.threshold[0:1], RTEnvdOpt.history_size[0:1], RTEnvdOpt.active_values[0:nthreads], RTEnvdOpt.cur_index[0:nthreads])
+#pragma omp target exit data map(delete:RTEnvdOpt, RTEnvdOpt.states[0:nthreads], RTEnvdOpt.predicted_values[0:nthreads], RTEnvdOpt.pSize[0:1], RTEnvdOpt.oTable[0:del_gtab_size], RTEnvdOpt.threshold[0:1], RTEnvdOpt.history_size[0:1], RTEnvdOpt.window_size[0:1], RTEnvdOpt.active_values[0:nthreads], RTEnvdOpt.cur_index[0:nthreads])
     }
 
   RTEnvdOpt.resetTable(thresh, num_output_items_per_entry, pSize, history_size, num_blocks, num_threads);
-#pragma omp target enter data map(to:RTEnvdOpt, RTEnvdOpt.states[0:nthreads], RTEnvdOpt.predicted_values[0:nthreads], RTEnvdOpt.pSize[0:1], RTEnvdOpt.oTable[0:gtab_size], RTEnvdOpt.threshold[0:1], RTEnvdOpt.history_size[0:1], RTEnvdOpt.active_values[0:nthreads], RTEnvdOpt.cur_index[0:nthreads])
+#pragma omp target enter data map(to:RTEnvdOpt, RTEnvdOpt.states[0:nthreads], RTEnvdOpt.predicted_values[0:nthreads], RTEnvdOpt.pSize[0:1], RTEnvdOpt.oTable[0:gtab_size], RTEnvdOpt.threshold[0:1], RTEnvdOpt.history_size[0:1], RTEnvdOpt.window_size[0:1], RTEnvdOpt.active_values[0:nthreads], RTEnvdOpt.cur_index[0:nthreads])
 
   output_mapped = true;
 }
@@ -363,6 +366,7 @@ public:
   int historySize = -1;
   int predictionSize = -1;
   int perfoStep;
+  int windowSize = 0;
   float perfoRate;
   float *randomNumbers;
   TableReplacementPolicy RP = CLOCK;
@@ -426,6 +430,11 @@ public:
     if (env_p) {
       historySize = atoi(env_p);
     }
+
+    env_p = std::getenv("WINDOW_SIZE");
+    if(env_p) {
+      windowSize = atoi(env_p);
+      }
 
     env_p = std::getenv("THRESHOLD");
     if (env_p) {
