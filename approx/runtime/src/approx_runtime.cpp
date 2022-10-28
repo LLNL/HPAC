@@ -21,6 +21,7 @@
 #include <random>
 #include <omp.h>
 #include <iostream>
+#include <cassert>
 
 #include "approx.h"
 #include "approx_debug.h"
@@ -257,6 +258,7 @@ void resetDeviceOutputTable(float thresh, int num_output_items_per_entry, int pS
 {
   int nthreads = num_threads * num_blocks;
   int gtab_size = nthreads * num_output_items_per_entry * history_size;
+
   if(output_mapped)
     {
       // TODO: nthreads can be different here as well
@@ -487,7 +489,7 @@ public:
       }
     else
       {
-        resetDeviceOutputTable(threshold, outputSize, predictionSize, historySize, numBlocks, threadsPerBlock);
+        resetDeviceOutputTable(threshold, outputSize, predictionSize, historySize, windowSize, numBlocks, threadsPerBlock);
       }
     #endif  //APPROX_DEV_STATS
 
@@ -633,130 +635,169 @@ void __approx_device_memo_out(void (*accurateFN)(void *), void *arg, const void 
       n_output_values += opts[i].num_elem;
     }
 
-  // Am I in the approximate state?
-  if(RTEnvdOpt.states[tid_global] == APPROX)
+  char states [32];
+  char cur_index [32];
+  char active_values[32];
+  real_t output_table[32];
+  #pragma omp allocate(states) allocator(omp_pteam_mem_alloc)
+  #pragma omp allocate(cur_index) allocator(omp_pteam_mem_alloc)
+  #pragma omp allocate(active_values) allocator(omp_pteam_mem_alloc)
+  #pragma omp allocate(output_table) allocator(omp_pteam_mem_alloc)
+
+  int warpId = omp_get_thread_num() / NTHREADS_IN_WARP;
+  int threadInWarp = omp_get_thread_num () % NTHREADS_IN_WARP;
+
+  int canary = RTEnvdOpt.states[omp_get_team_num()];
+  if(canary == 0)
     {
-      // we subtract one because 'cur_index' is the insertion point -- we want the last value inserted
-      int k = RTEnvdOpt.cur_index[tid_global] - 1;
-      if(k<0)
-        k=(*RTEnvdOpt.history_size)-1;
-      offset = 0;
 
-      for(int j = 0; j < nOutputs; j++)
-        {
-          for(int i = 0; i < opts[j].num_elem; i++)
-            {
-              int total_threads = omp_get_num_teams()*omp_get_num_threads();
-              size_t row_num = (k*n_output_values) + offset + i;
-              size_t col_num = tid_global;
-              size_t access_index = (row_num * total_threads) + col_num;
+      // TODO: bank conflicts?
+      states[threadInWarp] = ACCURATE;
+      cur_index[threadInWarp] = 0;
+      active_values[threadInWarp] = 0;
+      output_table[threadInWarp] = 0;
 
-              convertFromSingleWithOffset(outputs[j], RTEnvdOpt.oTable, i, access_index,
-                                        (ApproxType) out_reg[j].data_type);
-
-            }
-          offset += opts[j].num_elem;
-        }
-
-
-      if (--RTEnvdOpt.predicted_values[tid_global] == 0) {
-        RTEnvdOpt.states[tid_global] = ACCURATE;
-        RTEnvdOpt.active_values[tid_global] = 0;
-      }
+      if(omp_get_thread_num() == 0)
+        RTEnvdOpt.states[omp_get_team_num()] = 1;
     }
-  // OK -- I'm not in the approximate state.
-  else if(RTEnvdOpt.states[tid_global] == ACCURATE) {
-    accurateFN(arg);
 
-    int k = RTEnvdOpt.cur_index[tid_global];
-    offset = 0;
-    for(int j = 0; j < nOutputs; j++)
-      {
-        for(int i = 0; i < opts[j].num_elem; i++)
-          {
-            int total_threads = omp_get_num_teams()*omp_get_num_threads();
-            size_t row_num = (k*n_output_values) + offset + i;
-            size_t col_num = tid_global;
-            size_t access_index = (row_num * total_threads) + col_num;
+  syncThreadsAligned();
 
-            convertToSingleWithOffset(RTEnvdOpt.oTable, outputs[j], access_index, i,
-                                      (ApproxType) out_reg[j].data_type);
-
-          }
-        offset += opts[j].num_elem;
-      }
-    RTEnvdOpt.cur_index[tid_global] = (k+1) % (*RTEnvdOpt.history_size);
-    RTEnvdOpt.active_values[tid_global]++;
-  }
-
-  if(RTEnvdOpt.states[tid_global] == ACCURATE && RTEnvdOpt.active_values[tid_global] >= *RTEnvdOpt.history_size)
+  // NOTE: we will use predicted and active values as the same when the translation is done
+  for(int i = 0; i < omp_get_num_threads() / NTHREADS_IN_WARP; i++)
     {
-      real_t variance = 0.0;
-      real_t avg = 0.0;
-      const int total_threads = omp_get_num_threads() * omp_get_num_teams();
-
-      for(int k = 0; k < *RTEnvdOpt.history_size; k++)
+      if(warpId == i)
         {
-          offset = 0;
-          for(int j = 0; j < nOutputs; j++)
+          bool am_approx = states[threadInWarp] == APPROX;
+          if(am_approx)
             {
-              for(int i = 0; i < opts[j].num_elem; i++)
+              // we subtract one because 'cur_index' is the insertion point -- we want the last value inserted
+              int k =cur_index[threadInWarp] - 1;
+              if(k<0)
+                k=(*RTEnvdOpt.history_size)-1;
+              offset = 0;
+
+              for(int j = 0; j < nOutputs; j++)
                 {
-                  size_t row_num = (k*n_output_values) + offset + i;
-                  size_t col_num = tid_global;
-                  size_t access_index = (row_num*total_threads) + col_num;
+                  for(int i = 0; i < opts[j].num_elem; i++)
+                    {
+                      // TODO: access index
+                      size_t row_num = (k*n_output_values) + offset + i;
+                      size_t col_num = threadInWarp;
+                      size_t access_index = (row_num * NTHREADS_IN_WARP) + col_num;
 
-                  avg += RTEnvdOpt.oTable[access_index];
+                      convertFromSingleWithOffset(outputs[j], output_table, i, access_index,
+                                                  (ApproxType) out_reg[j].data_type);
 
+                    }
+                  offset += opts[j].num_elem;
                 }
-              offset += opts[j].num_elem;
+
+
+              if (--active_values[threadInWarp] == 0) {
+                states[threadInWarp] = ACCURATE;
+              }
+
+              // copy output
+              // decrement counter
+              // update state?
+            }
+          else
+            {
+              accurateFN(arg);
+
+              int k = cur_index[threadInWarp];
+              offset = 0;
+              for(int j = 0; j < nOutputs; j++)
+                {
+                  for(int i = 0; i < opts[j].num_elem; i++)
+                    {
+                      size_t row_num = (k*n_output_values) + offset + i;
+                      size_t col_num = threadInWarp;
+                      size_t access_index = (row_num * NTHREADS_IN_WARP) + col_num;
+
+                      convertToSingleWithOffset(output_table, outputs[j], access_index, i,
+                                                (ApproxType) out_reg[j].data_type);
+
+                    }
+                  offset += opts[j].num_elem;
+                }
+              cur_index[threadInWarp] = (k+1) % (*RTEnvdOpt.history_size);
+              active_values[threadInWarp]++;
+            }
+
+          if(states[threadInWarp] == ACCURATE && active_values[threadInWarp] >= *RTEnvdOpt.history_size)
+            {
+              real_t variance = 0.0;
+              real_t avg = 0.0;
+              const int total_threads = omp_get_num_threads() * omp_get_num_teams();
+
+              for(int k = 0; k < *RTEnvdOpt.history_size; k++)
+                {
+                  offset = 0;
+                  for(int j = 0; j < nOutputs; j++)
+                    {
+                      for(int i = 0; i < opts[j].num_elem; i++)
+                        {
+                          size_t row_num = (k*n_output_values) + offset + i;
+                          size_t col_num = threadInWarp;
+                          size_t access_index = (row_num * NTHREADS_IN_WARP) + col_num;
+
+                          avg += output_table[access_index];
+
+                        }
+                      offset += opts[j].num_elem;
+                    }
+                }
+
+              // average = sum / total_size
+              avg /= (real_t) (*RTEnvdOpt.history_size * n_output_values);
+
+              // for each entry in the table
+              // for each value in the entry
+              // tmp = val - avg
+              // variance += temp^2
+
+
+              for(int k = 0; k < *RTEnvdOpt.history_size; k++)
+                {
+                  offset = 0;
+                  for(int j = 0; j < nOutputs; j++)
+                    {
+                      for(int i = 0; i < opts[j].num_elem; i++)
+                        {
+                          size_t row_num = (k*n_output_values) + offset + i;
+                          size_t col_num = threadInWarp;
+                          size_t access_index = (row_num * NTHREADS_IN_WARP) + col_num;
+
+                          real_t tmp = output_table[access_index] - avg;
+                          variance += tmp*tmp;
+                        }
+                      offset += opts[j].num_elem;
+                    }
+                }
+
+              // variance /= total_size
+              variance /= (real_t)(*RTEnvdOpt.history_size * n_output_values);
+
+              // stdev = sqrt(variance)
+              real_t stdev = sqrt(variance);
+              real_t rsd = stdev;
+              if(avg != 0.0f){
+                rsd = stdev / avg;
+              }
+              if(rsd < 0.0) rsd = -rsd;
+
+              if(rsd < *RTEnvdOpt.threshold)
+                {
+                  // switch the machine state to approx
+                  states[threadInWarp] = APPROX;
+                  active_values[threadInWarp] = *RTEnvdOpt.pSize;
+                }
             }
         }
 
-      // average = sum / total_size
-      avg /= (real_t) (*RTEnvdOpt.history_size * n_output_values);
-
-      // for each entry in the table
-         // for each value in the entry
-            // tmp = val - avg
-            // variance += temp^2
-
-
-      for(int k = 0; k < *RTEnvdOpt.history_size; k++)
-        {
-          offset = 0;
-          for(int j = 0; j < nOutputs; j++)
-            {
-              for(int i = 0; i < opts[j].num_elem; i++)
-                {
-                  size_t row_num = (k*n_output_values) + offset + i;
-                  size_t col_num = tid_global;
-                  size_t access_index = (row_num*total_threads) + col_num;
-
-                  real_t tmp = RTEnvdOpt.oTable[access_index] - avg;
-                  variance += tmp*tmp;
-                }
-              offset += opts[j].num_elem;
-            }
-        }
-
-      // variance /= total_size
-      variance /= (real_t)(*RTEnvdOpt.history_size * n_output_values);
-
-      // stdev = sqrt(variance)
-      real_t stdev = sqrt(variance);
-      real_t rsd = stdev;
-      if(avg != 0.0f){
-        rsd = stdev / avg;
-      }
-      if(rsd < 0.0) rsd = -rsd;
-
-      if(rsd < *RTEnvdOpt.threshold)
-        {
-          // switch the machine state to approx
-          RTEnvdOpt.states[tid_global] = APPROX;
-          RTEnvdOpt.predicted_values[tid_global] = *RTEnvdOpt.pSize;
-        }
+      syncThreadsAligned();
     }
 }
 
