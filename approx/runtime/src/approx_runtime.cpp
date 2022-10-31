@@ -648,6 +648,7 @@ void __approx_device_memo_out(void (*accurateFN)(void *), void *arg, const void 
   int threadInWarp = omp_get_thread_num () % NTHREADS_IN_WARP;
 
   int canary = RTEnvdOpt.states[omp_get_team_num()];
+  syncThreadsAligned();
   if(canary == 0)
     {
 
@@ -730,7 +731,6 @@ void __approx_device_memo_out(void (*accurateFN)(void *), void *arg, const void 
             {
               real_t variance = 0.0;
               real_t avg = 0.0;
-              const int total_threads = omp_get_num_threads() * omp_get_num_teams();
 
               for(int k = 0; k < *RTEnvdOpt.history_size; k++)
                 {
