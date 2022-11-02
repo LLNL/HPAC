@@ -564,6 +564,12 @@ const int approx_rt_get_step(){
 
 #pragma omp begin declare target device_type(nohost)
 
+  unsigned getMask(unsigned l, unsigned r)
+  {
+    return (((1 << (l - 1)) - 1) ^
+            ((1 << (r)) - 1));
+  }
+
 unsigned int get_table_mask()
 {
 
@@ -634,170 +640,178 @@ void __approx_device_memo_out(void (*accurateFN)(void *), void *arg, const void 
     {
       n_output_values += opts[i].num_elem;
     }
+  #define WIDTH 32
 
-  char states [32];
-  char cur_index [32];
-  char active_values[32];
-  real_t output_table[32];
+  char states [NTHREADS_IN_WARP/WIDTH];
+  char cur_index [NTHREADS_IN_WARP/WIDTH];
+  char active_values[NTHREADS_IN_WARP/WIDTH];
+  real_t output_table[NTHREADS_IN_WARP/WIDTH];
   #pragma omp allocate(states) allocator(omp_pteam_mem_alloc)
   #pragma omp allocate(cur_index) allocator(omp_pteam_mem_alloc)
   #pragma omp allocate(active_values) allocator(omp_pteam_mem_alloc)
   #pragma omp allocate(output_table) allocator(omp_pteam_mem_alloc)
 
-  int warpId = omp_get_thread_num() / NTHREADS_IN_WARP;
-  int threadInWarp = omp_get_thread_num () % NTHREADS_IN_WARP;
+  const int warpId = omp_get_thread_num() / NTHREADS_IN_WARP;
+  const int sublaneInWarp = (omp_get_thread_num () % NTHREADS_IN_WARP) / WIDTH;
+  const int threadInSublane = omp_get_thread_num() % WIDTH;
 
-  int canary = RTEnvdOpt.states[omp_get_team_num()];
-  syncThreadsAligned();
+  const unsigned int myMask = getMask(1, WIDTH) << (WIDTH*sublaneInWarp);
+
+  int globalSublaneID = (omp_get_team_num() * omp_get_num_threads() / WIDTH) + (omp_get_thread_num() / WIDTH);
+  int canary = RTEnvdOpt.states[globalSublaneID];
+  syncWarp(myMask);
   if(canary == 0)
     {
 
       // TODO: bank conflicts?
-      states[threadInWarp] = ACCURATE;
-      cur_index[threadInWarp] = 0;
-      active_values[threadInWarp] = 0;
-      output_table[threadInWarp] = 0;
+      if(threadInSublane == 0)
+        {
+          states[sublaneInWarp] = ACCURATE;
+          cur_index[sublaneInWarp] = 0;
+          active_values[sublaneInWarp] = 0;
+          output_table[sublaneInWarp] = 0;
 
-      if(omp_get_thread_num() == 0)
-        RTEnvdOpt.states[omp_get_team_num()] = 1;
+          RTEnvdOpt.states[globalSublaneID] = 1;
+        }
     }
 
-  syncThreadsAligned();
+  syncWarp(FULL_MASK);
 
   // NOTE: we will use predicted and active values as the same when the translation is done
-  for(int i = 0; i < omp_get_num_threads() / NTHREADS_IN_WARP; i++)
+  bool am_approx = states[sublaneInWarp] == APPROX;
+  if(am_approx)
     {
-      if(warpId == i)
+      // we subtract one because 'cur_index' is the insertion point -- we want the last value inserted
+      int k =cur_index[sublaneInWarp] - 1;
+      if(k<0)
+        k=(*RTEnvdOpt.history_size)-1;
+      offset = 0;
+
+      for(int j = 0; j < nOutputs; j++)
         {
-          bool am_approx = states[threadInWarp] == APPROX;
-          if(am_approx)
+          for(int i = 0; i < opts[j].num_elem; i++)
             {
-              // we subtract one because 'cur_index' is the insertion point -- we want the last value inserted
-              int k =cur_index[threadInWarp] - 1;
-              if(k<0)
-                k=(*RTEnvdOpt.history_size)-1;
-              offset = 0;
+              // TODO: access index
+              size_t row_num = (k*n_output_values) + offset + i;
+              size_t col_num = sublaneInWarp;
+              size_t access_index = (row_num * NTHREADS_IN_WARP/WIDTH) + col_num;
 
-              for(int j = 0; j < nOutputs; j++)
-                {
-                  for(int i = 0; i < opts[j].num_elem; i++)
-                    {
-                      // TODO: access index
-                      size_t row_num = (k*n_output_values) + offset + i;
-                      size_t col_num = threadInWarp;
-                      size_t access_index = (row_num * NTHREADS_IN_WARP) + col_num;
+              convertFromSingleWithOffset(outputs[j], output_table, i, access_index,
+                                          (ApproxType) out_reg[j].data_type);
 
-                      convertFromSingleWithOffset(outputs[j], output_table, i, access_index,
-                                                  (ApproxType) out_reg[j].data_type);
-
-                    }
-                  offset += opts[j].num_elem;
-                }
-
-
-              if (--active_values[threadInWarp] == 0) {
-                states[threadInWarp] = ACCURATE;
-              }
-
-              // copy output
-              // decrement counter
-              // update state?
             }
-          else
+          offset += opts[j].num_elem;
+        }
+
+
+      if(threadInSublane == 0)
+        {
+          active_values[sublaneInWarp] -= WIDTH;
+          if (active_values[sublaneInWarp] == 0) {
+            states[sublaneInWarp] = ACCURATE;
+          }
+        }
+    }
+  else
+    {
+      accurateFN(arg);
+
+      int k = cur_index[sublaneInWarp];
+      offset = 0;
+      for(int j = 0; j < nOutputs; j++)
+        {
+          for(int i = 0; i < opts[j].num_elem; i++)
             {
-              accurateFN(arg);
+              size_t row_num = (k*n_output_values) + offset + i;
+              size_t col_num = sublaneInWarp;
+              size_t access_index = (row_num * NTHREADS_IN_WARP/WIDTH) + col_num;
 
-              int k = cur_index[threadInWarp];
-              offset = 0;
-              for(int j = 0; j < nOutputs; j++)
-                {
-                  for(int i = 0; i < opts[j].num_elem; i++)
-                    {
-                      size_t row_num = (k*n_output_values) + offset + i;
-                      size_t col_num = threadInWarp;
-                      size_t access_index = (row_num * NTHREADS_IN_WARP) + col_num;
+              convertToSingleWithOffset(output_table, outputs[j], access_index, i,
+                                        (ApproxType) out_reg[j].data_type);
 
-                      convertToSingleWithOffset(output_table, outputs[j], access_index, i,
-                                                (ApproxType) out_reg[j].data_type);
-
-                    }
-                  offset += opts[j].num_elem;
-                }
-              cur_index[threadInWarp] = (k+1) % (*RTEnvdOpt.history_size);
-              active_values[threadInWarp]++;
             }
+          offset += opts[j].num_elem;
+        }
 
-          if(states[threadInWarp] == ACCURATE && active_values[threadInWarp] >= *RTEnvdOpt.history_size)
+      if(threadInSublane == 0)
+        {
+          cur_index[sublaneInWarp] = (k+WIDTH) % (*RTEnvdOpt.history_size);
+          active_values[sublaneInWarp] += WIDTH;
+        }
+    }
+
+  syncWarp(myMask);
+
+  if(states[sublaneInWarp] == ACCURATE && active_values[sublaneInWarp] >= *RTEnvdOpt.history_size)
+    {
+      real_t variance = 0.0;
+      real_t avg = 0.0;
+
+      for(int k = threadInSublane; k < *RTEnvdOpt.history_size; k += WIDTH)
+        {
+          offset = 0;
+          for(int j = 0; j < nOutputs; j++)
             {
-              real_t variance = 0.0;
-              real_t avg = 0.0;
-
-              for(int k = 0; k < *RTEnvdOpt.history_size; k++)
+              for(int i = 0; i < opts[j].num_elem; i++)
                 {
-                  offset = 0;
-                  for(int j = 0; j < nOutputs; j++)
-                    {
-                      for(int i = 0; i < opts[j].num_elem; i++)
-                        {
-                          size_t row_num = (k*n_output_values) + offset + i;
-                          size_t col_num = threadInWarp;
-                          size_t access_index = (row_num * NTHREADS_IN_WARP) + col_num;
+                  size_t row_num = (k*n_output_values) + offset + i;
+                  size_t col_num = sublaneInWarp;
+                  size_t access_index = (row_num * NTHREADS_IN_WARP/WIDTH) + col_num;
 
-                          avg += output_table[access_index];
+                  avg += output_table[access_index];
 
-                        }
-                      offset += opts[j].num_elem;
-                    }
                 }
+              offset += opts[j].num_elem;
+            }
+        }
+      avg = reduceSumImpl(myMask, avg);
 
-              // average = sum / total_size
-              avg /= (real_t) (*RTEnvdOpt.history_size * n_output_values);
+      // average = sum / total_size
+      avg /= (real_t) (*RTEnvdOpt.history_size * n_output_values);
 
-              // for each entry in the table
-              // for each value in the entry
-              // tmp = val - avg
-              // variance += temp^2
+      // for each entry in the table
+      // for each value in the entry
+      // tmp = val - avg
+      // variance += temp^2
 
 
-              for(int k = 0; k < *RTEnvdOpt.history_size; k++)
+      for(int k = threadInSublane; k < *RTEnvdOpt.history_size; k += WIDTH)
+        {
+          offset = 0;
+          for(int j = 0; j < nOutputs; j++)
+            {
+              for(int i = 0; i < opts[j].num_elem; i++)
                 {
-                  offset = 0;
-                  for(int j = 0; j < nOutputs; j++)
-                    {
-                      for(int i = 0; i < opts[j].num_elem; i++)
-                        {
-                          size_t row_num = (k*n_output_values) + offset + i;
-                          size_t col_num = threadInWarp;
-                          size_t access_index = (row_num * NTHREADS_IN_WARP) + col_num;
+                  size_t row_num = (k*n_output_values) + offset + i;
+                  size_t col_num = sublaneInWarp;
+                  size_t access_index = (row_num * NTHREADS_IN_WARP/WIDTH) + col_num;
 
-                          real_t tmp = output_table[access_index] - avg;
-                          variance += tmp*tmp;
-                        }
-                      offset += opts[j].num_elem;
-                    }
+                  real_t tmp = output_table[access_index] - avg;
+                  variance += tmp*tmp;
                 }
-
-              // variance /= total_size
-              variance /= (real_t)(*RTEnvdOpt.history_size * n_output_values);
-
-              // stdev = sqrt(variance)
-              real_t stdev = sqrt(variance);
-              real_t rsd = stdev;
-              if(avg != 0.0f){
-                rsd = stdev / avg;
-              }
-              if(rsd < 0.0) rsd = -rsd;
-
-              if(rsd < *RTEnvdOpt.threshold)
-                {
-                  // switch the machine state to approx
-                  states[threadInWarp] = APPROX;
-                  active_values[threadInWarp] = *RTEnvdOpt.pSize;
-                }
+              offset += opts[j].num_elem;
             }
         }
 
-      syncThreadsAligned();
+      // variance /= total_size
+      variance = reduceSumImpl(myMask, variance);
+      variance /= (real_t)(*RTEnvdOpt.history_size * n_output_values);
+
+      real_t stdev = sqrt(variance);
+      real_t rsd = stdev;
+      if(avg != 0.0f){
+        rsd = stdev / avg;
+      }
+      if(rsd < 0.0) rsd = -rsd;
+
+      // No need to sync here: warp reductions sync threads identified by the mask
+      if(threadInSublane == 0 && rsd < *RTEnvdOpt.threshold)
+        {
+          // switch the machine state to approx
+          states[sublaneInWarp] = APPROX;
+          active_values[sublaneInWarp] = *RTEnvdOpt.pSize;
+        }
+      syncWarp(myMask);
     }
 }
 
