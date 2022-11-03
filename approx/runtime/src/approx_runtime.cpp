@@ -644,7 +644,7 @@ void __approx_device_memo_out(void (*accurateFN)(void *), void *arg, const void 
 
   char states [NTHREADS_IN_WARP/WIDTH];
   char cur_index [NTHREADS_IN_WARP/WIDTH];
-  char active_values[NTHREADS_IN_WARP/WIDTH];
+  int active_values[NTHREADS_IN_WARP/WIDTH];
   real_t output_table[NTHREADS_IN_WARP/WIDTH];
   #pragma omp allocate(states) allocator(omp_pteam_mem_alloc)
   #pragma omp allocate(cur_index) allocator(omp_pteam_mem_alloc)
