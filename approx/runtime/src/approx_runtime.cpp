@@ -642,18 +642,27 @@ void __approx_device_memo_out(void (*accurateFN)(void *), void *arg, const void 
     }
   #define WIDTH 32
 
-  char states [NTHREADS_IN_WARP/WIDTH];
-  char cur_index [NTHREADS_IN_WARP/WIDTH];
-  int active_values[NTHREADS_IN_WARP/WIDTH];
-  real_t output_table[NTHREADS_IN_WARP/WIDTH];
-  #pragma omp allocate(states) allocator(omp_pteam_mem_alloc)
-  #pragma omp allocate(cur_index) allocator(omp_pteam_mem_alloc)
-  #pragma omp allocate(active_values) allocator(omp_pteam_mem_alloc)
-  #pragma omp allocate(output_table) allocator(omp_pteam_mem_alloc)
+  // TODO: this '8' should be the number of warps per block
+  char _states [8*NTHREADS_IN_WARP/WIDTH];
+  char _cur_index [8*NTHREADS_IN_WARP/WIDTH];
+  int _active_values[8*NTHREADS_IN_WARP/WIDTH];
+  // TODO: This will be problematic if history size != width
+  real_t _output_table[8*32];
+  #pragma omp allocate(_states) allocator(omp_pteam_mem_alloc)
+  #pragma omp allocate(_cur_index) allocator(omp_pteam_mem_alloc)
+  #pragma omp allocate(_active_values) allocator(omp_pteam_mem_alloc)
+  #pragma omp allocate(_output_table) allocator(omp_pteam_mem_alloc)
 
   const int warpId = omp_get_thread_num() / NTHREADS_IN_WARP;
   const int sublaneInWarp = (omp_get_thread_num () % NTHREADS_IN_WARP) / WIDTH;
   const int threadInSublane = omp_get_thread_num() % WIDTH;
+
+  int sm_offset = warpId * (NTHREADS_IN_WARP/WIDTH);
+  char *states = _states + sm_offset;
+  char *cur_index = _cur_index + sm_offset;
+  int *active_values = _active_values + sm_offset;
+  // TODO: again a problem if history size is not width
+  real_t *output_table = _output_table + (WIDTH*sm_offset);
 
   const unsigned int myMask = getMask(1, WIDTH) << (WIDTH*sublaneInWarp);
 
@@ -704,6 +713,7 @@ void __approx_device_memo_out(void (*accurateFN)(void *), void *arg, const void 
         }
 
 
+      syncWarp(myMask);
       if(threadInSublane == 0)
         {
           active_values[sublaneInWarp] -= WIDTH;
@@ -716,7 +726,7 @@ void __approx_device_memo_out(void (*accurateFN)(void *), void *arg, const void 
     {
       accurateFN(arg);
 
-      int k = cur_index[sublaneInWarp];
+      int k = cur_index[sublaneInWarp] + threadInSublane;
       offset = 0;
       for(int j = 0; j < nOutputs; j++)
         {
@@ -733,6 +743,7 @@ void __approx_device_memo_out(void (*accurateFN)(void *), void *arg, const void 
           offset += opts[j].num_elem;
         }
 
+      syncWarp(myMask);
       if(threadInSublane == 0)
         {
           cur_index[sublaneInWarp] = (k+WIDTH) % (*RTEnvdOpt.history_size);
