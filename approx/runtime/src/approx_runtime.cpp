@@ -30,10 +30,7 @@
 #include "approx_device_memo_table.h"
 #include "device_intrinsics.h"
 
-    // TODO: this should go to cmake
-#define NTHREADS_IN_WARP 32
 #define FULL_MASK 0xFFFFFFFF
-
 
 using namespace std;
 
@@ -642,9 +639,9 @@ void __approx_device_memo_out(void (*accurateFN)(void *), void *arg, const void 
     }
 
   // TODO: this '8' should be the number of warps per block
-  char _states [8*NTHREADS_IN_WARP/TAF_THREAD_WIDTH];
-  char _cur_index [8*NTHREADS_IN_WARP/TAF_THREAD_WIDTH];
-  int _active_values[8*NTHREADS_IN_WARP/TAF_THREAD_WIDTH];
+  char _states [8*NTHREADS_PER_WARP/TAF_THREAD_WIDTH];
+  char _cur_index [8*NTHREADS_PER_WARP/TAF_THREAD_WIDTH];
+  int _active_values[8*NTHREADS_PER_WARP/TAF_THREAD_WIDTH];
   // TODO: This will be problematic if history size != width
   real_t _output_table[8*32];
   #pragma omp allocate(_states) allocator(omp_pteam_mem_alloc)
@@ -652,11 +649,11 @@ void __approx_device_memo_out(void (*accurateFN)(void *), void *arg, const void 
   #pragma omp allocate(_active_values) allocator(omp_pteam_mem_alloc)
   #pragma omp allocate(_output_table) allocator(omp_pteam_mem_alloc)
 
-  const int warpId = omp_get_thread_num() / NTHREADS_IN_WARP;
-  const int sublaneInWarp = (omp_get_thread_num () % NTHREADS_IN_WARP) / TAF_THREAD_WIDTH;
+  const int warpId = omp_get_thread_num() / NTHREADS_PER_WARP;
+  const int sublaneInWarp = (omp_get_thread_num () % NTHREADS_PER_WARP) / TAF_THREAD_WIDTH;
   const int threadInSublane = omp_get_thread_num() % TAF_THREAD_WIDTH;
 
-  int sm_offset = warpId * (NTHREADS_IN_WARP/TAF_THREAD_WIDTH);
+  int sm_offset = warpId * (NTHREADS_PER_WARP/TAF_THREAD_WIDTH);
   char *states = _states + sm_offset;
   char *cur_index = _cur_index + sm_offset;
   int *active_values = _active_values + sm_offset;
@@ -702,7 +699,7 @@ void __approx_device_memo_out(void (*accurateFN)(void *), void *arg, const void 
               // TODO: access index
               size_t row_num = (k*n_output_values) + offset + i;
               size_t col_num = sublaneInWarp;
-              size_t access_index = (row_num * NTHREADS_IN_WARP/TAF_THREAD_WIDTH) + col_num;
+              size_t access_index = (row_num * NTHREADS_PER_WARP/TAF_THREAD_WIDTH) + col_num;
 
               convertFromSingleWithOffset(outputs[j], output_table, i, access_index,
                                           (ApproxType) out_reg[j].data_type);
@@ -733,7 +730,7 @@ void __approx_device_memo_out(void (*accurateFN)(void *), void *arg, const void 
             {
               size_t row_num = (k*n_output_values) + offset + i;
               size_t col_num = sublaneInWarp;
-              size_t access_index = (row_num * NTHREADS_IN_WARP/TAF_THREAD_WIDTH) + col_num;
+              size_t access_index = (row_num * NTHREADS_PER_WARP/TAF_THREAD_WIDTH) + col_num;
 
               convertToSingleWithOffset(output_table, outputs[j], access_index, i,
                                         (ApproxType) out_reg[j].data_type);
@@ -766,7 +763,7 @@ void __approx_device_memo_out(void (*accurateFN)(void *), void *arg, const void 
                 {
                   size_t row_num = (k*n_output_values) + offset + i;
                   size_t col_num = sublaneInWarp;
-                  size_t access_index = (row_num * NTHREADS_IN_WARP/TAF_THREAD_WIDTH) + col_num;
+                  size_t access_index = (row_num * NTHREADS_PER_WARP/TAF_THREAD_WIDTH) + col_num;
 
                   avg += output_table[access_index];
 
@@ -794,7 +791,7 @@ void __approx_device_memo_out(void (*accurateFN)(void *), void *arg, const void 
                 {
                   size_t row_num = (k*n_output_values) + offset + i;
                   size_t col_num = sublaneInWarp;
-                  size_t access_index = (row_num * NTHREADS_IN_WARP/TAF_THREAD_WIDTH) + col_num;
+                  size_t access_index = (row_num * NTHREADS_PER_WARP/TAF_THREAD_WIDTH) + col_num;
 
                   real_t tmp = output_table[access_index] - avg;
                   variance += tmp*tmp;
