@@ -712,7 +712,7 @@ void __approx_device_memo_out(void (*accurateFN)(void *), void *arg, const void 
       syncWarp(myMask);
       if(threadInSublane == 0)
         {
-          active_values[sublaneInWarp] -= TAF_THREAD_WIDTH;
+          active_values[sublaneInWarp]--;
           if (active_values[sublaneInWarp] == 0) {
             states[sublaneInWarp] = ACCURATE;
           }
@@ -743,7 +743,7 @@ void __approx_device_memo_out(void (*accurateFN)(void *), void *arg, const void 
       if(threadInSublane == 0)
         {
           cur_index[sublaneInWarp] = (k+TAF_THREAD_WIDTH) % (*RTEnvdOpt.history_size);
-          active_values[sublaneInWarp] += TAF_THREAD_WIDTH;
+          active_values[sublaneInWarp] += 1;
         }
     }
 
