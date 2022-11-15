@@ -60,6 +60,7 @@ enum DevApproxRTArgsIndex : uint {
   DevAccessDescOut,
   DevDataPtrOut,
   DevDataSizeOut,
+  DevInitDone,
   DEV_ARG_END
 };
 

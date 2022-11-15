@@ -621,7 +621,7 @@ unsigned int tnum_in_table_with_max_dist(float max_dist)
 }
 
 __attribute__((always_inline))
-void __approx_device_memo_out(void (*accurateFN)(void *), void *arg, const void *region_info_out, const void *opt_access, void **outputs, const int nOutputs)
+void __approx_device_memo_out(void (*accurateFN)(void *), void *arg, const void *region_info_out, const void *opt_access, void **outputs, const int nOutputs, const char init_done)
 {
   const approx_region_specification *out_reg = (const approx_region_specification*) region_info_out;
   approx_var_access_t *opts = (approx_var_access_t*) opt_access;
@@ -663,20 +663,15 @@ void __approx_device_memo_out(void (*accurateFN)(void *), void *arg, const void 
   const unsigned int myMask = getMask(1, TAF_THREAD_WIDTH) << (TAF_THREAD_WIDTH*sublaneInWarp);
 
   int globalSublaneID = (omp_get_team_num() * omp_get_num_threads() / TAF_THREAD_WIDTH) + (omp_get_thread_num() / TAF_THREAD_WIDTH);
-  int canary = RTEnvdOpt.states[globalSublaneID];
-  syncWarp(myMask);
-  if(canary == 0)
+  if(!init_done)
     {
 
-      // TODO: bank conflicts?
       if(threadInSublane == 0)
         {
           states[sublaneInWarp] = ACCURATE;
           cur_index[sublaneInWarp] = 0;
           active_values[sublaneInWarp] = 0;
           output_table[sublaneInWarp] = 0;
-
-          RTEnvdOpt.states[globalSublaneID] = 1;
         }
     }
 
@@ -999,7 +994,7 @@ void __approx_device_memo_in(void (*accurateFN)(void *), void *arg, const void *
 }
 
 __attribute__((always_inline))
-void __approx_device_memo(void (*accurateFN)(void *), void *arg, int memo_type, const void *region_info_in, const void *ipt_access, const void **inputs, const int nInputs, const void *region_info_out, const void *opt_access, void **outputs, const int nOutputs)
+void __approx_device_memo(void (*accurateFN)(void *), void *arg, int memo_type, const void *region_info_in, const void *ipt_access, const void **inputs, const int nInputs, const void *region_info_out, const void *opt_access, void **outputs, const int nOutputs, const char init_done)
 {
   if(memo_type == MEMO_IN)
     {
@@ -1007,11 +1002,25 @@ void __approx_device_memo(void (*accurateFN)(void *), void *arg, int memo_type, 
     }
   else if(memo_type == MEMO_OUT)
     {
-      __approx_device_memo_out(accurateFN, arg, region_info_out, opt_access, outputs, nOutputs);
+      __approx_device_memo_out(accurateFN, arg, region_info_out, opt_access, outputs, nOutputs, init_done);
     }
   else
     {
       printf("ERROR: Incorrect memo type");
     }
 }
+#pragma omp end declare target
+
+#pragma omp begin declare target
+  void __approx_check_init(char init_done)
+  {
+    if(omp_get_thread_num() + omp_get_team_num() != 0)
+      return;
+    printf("%d\n", omp_get_num_threads());
+    if(init_done)
+      printf("Init is done!\n");
+    else
+      printf("Init is not done!\n");
+  }
+
 #pragma omp end declare target

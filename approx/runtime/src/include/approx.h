@@ -30,7 +30,10 @@ void __approx_exec_call(void (*accurate)(void *), void (*perforate)(void *),
                         int num_outputs);
 #pragma omp begin declare target device_type(nohost)
 __attribute__((always_inline))
-void __approx_device_memo(void (*accurateFN)(void *), void *arg, int memo_type, const void *region_info_in, const void *ipt_access, const void **inputs, const int nInputs, const void *region_info_out, const void *opt_access, void **outputs, const int nOutputs);
+void __approx_device_memo(void (*accurateFN)(void *), void *arg, int memo_type, const void *region_info_in, const void *ipt_access, const void **inputs, const int nInputs, const void *region_info_out, const void *opt_access, void **outputs, const int nOutputs, const char init_done);
+#pragma omp end declare target
+#pragma omp begin declare target
+  void __approx_check_init(char init_done);
 
 #pragma omp end declare target
 const float approx_rt_get_percentage();

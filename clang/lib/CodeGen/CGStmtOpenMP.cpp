@@ -5606,6 +5606,47 @@ void CodeGenFunction::EmitOMPDistributeLoop(const OMPLoopDirective &S,
     // Emit 'then' code.
     {
       // Emit helper vars inits.
+      using namespace llvm;
+      using namespace clang;
+      using namespace CodeGen;
+  auto &OMPRT = static_cast<CGOpenMPRuntime&>(CGM.getOpenMPRuntime());
+  QualType BoolTy = getContext().getIntTypeForBitwidth(8, false);
+  Address InitCheck = CreateMemTemp(BoolTy);
+  OMPRT.ApproxInitCheck = InitCheck;
+  ASTContext &C = CGM.getContext();
+  EmitStoreOfScalar(llvm::ConstantInt::get(Int8Ty, 1, false), InitCheck, false, BoolTy, AlignmentSource::Type, false, false);
+
+  {
+    Function *CheckFn = nullptr;
+    StringRef CheckFnName("__approx_check_init");
+
+    CheckFn = CGM.getModule().getFunction(CheckFnName);
+
+    static llvm::FunctionType *CheckFnTy = nullptr;
+
+    if(!CheckFnTy)
+      {CheckFnTy = llvm::FunctionType::get(CGM.VoidTy,
+                                           {
+                                             /* Initialization done */ CGM.Int8Ty
+                                           },
+                                           false);
+
+      }
+
+    if (!CheckFn)
+      {
+        CheckFn = Function::Create(CheckFnTy, GlobalValue::ExternalLinkage, CheckFnName,
+                                   CGM.getModule());
+        // RTFnDev->addFnAttr(Attribute::AttrKind::AlwaysInline);
+      }
+
+    llvm::FunctionCallee CheckFnCallee({CheckFnTy, CheckFn});
+    llvm::Value *InitCheckValue = EmitLoadOfScalar(InitCheck, false, BoolTy, SourceLocation());
+    std::vector<llvm::Value*> Param{InitCheckValue};
+    EmitRuntimeCall(CheckFnCallee, ArrayRef<llvm::Value *>(Param));
+
+  }
+
 
       LValue LB = EmitOMPHelperVar(
           *this, cast<DeclRefExpr>(
@@ -7526,6 +7567,8 @@ static void emitTargetParallelForRegion(CodeGenFunction &CGF,
     CGF.EmitOMPWorksharingLoop(S, S.getEnsureUpperBound(), emitForLoopBounds,
                                emitDispatchForLoopBounds);
   };
+
+
   emitCommonOMPParallelDirective(CGF, S, OMPD_for, CodeGen,
                                  emitEmptyBoundParameters);
 }

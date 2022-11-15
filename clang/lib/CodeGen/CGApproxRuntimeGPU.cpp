@@ -259,7 +259,8 @@ CGApproxRuntimeGPU::CGApproxRuntimeGPU(CodeGenModule &CGM)
                                            /* Output Data Descr. */ CGM.VoidPtrTy,
                                            /* Output Access Descr. */ CGM.VoidPtrTy,
                                            /* Output Data Pointers. */ CGM.VoidPtrTy,
-                                           /* Output Data Num Elements */ CGM.Int32Ty
+                                           /* Output Data Num Elements */ CGM.Int32Ty,
+                                           /* Initialization done */ CGM.Int8Ty
                                          },
                                          false);
 }
@@ -349,6 +350,45 @@ void CGApproxRuntimeGPU::CGApproxRuntimeExitRegion(CodeGenFunction &CGF) {
 
   llvm::FunctionCallee RTFnCallee({RTFnTy, RTFnDev});
   CGF.EmitRuntimeCall(RTFnCallee, ArrayRef<llvm::Value *>(approxRTParams));
+
+  // Signal now that we have initialized any runtime state -- allows us to check this value in the runtime function call
+  //TODO: clean this up
+  auto &OMPRT = static_cast<CGOpenMPRuntimeGPU &>(CGF.CGM.getOpenMPRuntime());
+  Address InitCheck = OMPRT.ApproxInitCheck;
+  ASTContext &C = CGM.getContext();
+  QualType BoolTy = C.getIntTypeForBitwidth(8, false);
+  CGF.EmitStoreOfScalar(llvm::ConstantInt::get(CGF.Int8Ty, 1, false), InitCheck, false, BoolTy, AlignmentSource::Type, false, false);
+
+  // {
+  //   Function *CheckFn = nullptr;
+  //   StringRef CheckFnName("__approx_check_init");
+
+  //   CheckFn = CGM.getModule().getFunction(CheckFnName);
+
+  //   static llvm::FunctionType *CheckFnTy = nullptr;
+
+  //   if(!CheckFnTy)
+  //     {CheckFnTy = llvm::FunctionType::get(CGM.VoidTy,
+  //                                          {
+  //                                            /* Initialization done */ CGM.Int8Ty
+  //                                          },
+  //                                          false);
+
+  //     }
+
+  //   if (!CheckFn)
+  //     {
+  //       CheckFn = Function::Create(CheckFnTy, GlobalValue::ExternalLinkage, CheckFnName,
+  //                                  CGM.getModule());
+  //       // RTFnDev->addFnAttr(Attribute::AttrKind::AlwaysInline);
+  //     }
+
+  //   llvm::FunctionCallee CheckFnCallee({CheckFnTy, CheckFn});
+  //   llvm::Value *InitCheckValue = CGF.EmitLoadOfScalar(InitCheck, false, BoolTy, SourceLocation());
+  //   std::vector<llvm::Value*> Param{InitCheckValue};
+  //   CGF.EmitRuntimeCall(CheckFnCallee, ArrayRef<llvm::Value *>(Param));
+
+  // }
 }
 
 void CGApproxRuntimeGPU::CGApproxRuntimeEmitInitData(
@@ -563,12 +603,12 @@ void CGApproxRuntimeGPU::CGApproxRuntimeEmitDataValues(CodeGenFunction &CGF) {
   ArrayOptPtrBase = declarePtrArrays(CGF, Outputs, namePtr);
 
   llvm::Value *InitCheckValue = CGF.EmitLoadOfScalar(InitCheck, false, BoolTy, SourceLocation());
+  approxRTParams[DevInitDone] = InitCheckValue;
 
   llvm::Value *InitDone = CGF.Builder.CreateICmpEQ(InitCheckValue, llvm::ConstantInt::get(CGF.Int8Ty, 1));
   CGF.Builder.CreateCondBr(InitDone, ContinueBody, StoreBody);
 
   CGF.EmitBlock(StoreBody);
-  CGF.EmitStoreOfScalar(llvm::ConstantInt::get(CGF.Int8Ty, 1, false), InitCheck, false, BoolTy, AlignmentSource::Type, false, false);
 
   llvm::Value *ThreadID = OMPRT.getGPUThreadID(CGF);
   llvm::Value *AmFirstThreadInBlock = CGF.Builder.CreateICmpEQ(ThreadID, llvm::ConstantInt::get(CGF.IntTy, 0));
