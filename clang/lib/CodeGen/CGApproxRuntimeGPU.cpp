@@ -353,42 +353,8 @@ void CGApproxRuntimeGPU::CGApproxRuntimeExitRegion(CodeGenFunction &CGF) {
 
   // Signal now that we have initialized any runtime state -- allows us to check this value in the runtime function call
   //TODO: clean this up
-  auto &OMPRT = static_cast<CGOpenMPRuntimeGPU &>(CGF.CGM.getOpenMPRuntime());
-  Address InitCheck = OMPRT.ApproxInitCheck;
-  ASTContext &C = CGM.getContext();
-  QualType BoolTy = C.getIntTypeForBitwidth(8, false);
-  CGF.EmitStoreOfScalar(llvm::ConstantInt::get(CGF.Int8Ty, 1, false), InitCheck, false, BoolTy, AlignmentSource::Type, false, false);
-
-  // {
-  //   Function *CheckFn = nullptr;
-  //   StringRef CheckFnName("__approx_check_init");
-
-  //   CheckFn = CGM.getModule().getFunction(CheckFnName);
-
-  //   static llvm::FunctionType *CheckFnTy = nullptr;
-
-  //   if(!CheckFnTy)
-  //     {CheckFnTy = llvm::FunctionType::get(CGM.VoidTy,
-  //                                          {
-  //                                            /* Initialization done */ CGM.Int8Ty
-  //                                          },
-  //                                          false);
-
-  //     }
-
-  //   if (!CheckFn)
-  //     {
-  //       CheckFn = Function::Create(CheckFnTy, GlobalValue::ExternalLinkage, CheckFnName,
-  //                                  CGM.getModule());
-  //       // RTFnDev->addFnAttr(Attribute::AttrKind::AlwaysInline);
-  //     }
-
-  //   llvm::FunctionCallee CheckFnCallee({CheckFnTy, CheckFn});
-  //   llvm::Value *InitCheckValue = CGF.EmitLoadOfScalar(InitCheck, false, BoolTy, SourceLocation());
-  //   std::vector<llvm::Value*> Param{InitCheckValue};
-  //   CGF.EmitRuntimeCall(CheckFnCallee, ArrayRef<llvm::Value *>(Param));
-
-  // }
+  QualType BoolTy = CGF.getContext().getIntTypeForBitwidth(8, false);
+  CGF.EmitStoreOfScalar(llvm::ConstantInt::get(CGF.Int8Ty, 1, false), ApproxInitAddress, false, BoolTy, AlignmentSource::Type, false, false);
 }
 
 void CGApproxRuntimeGPU::CGApproxRuntimeEmitInitData(
@@ -414,6 +380,37 @@ void CGApproxRuntimeGPU::CGApproxRuntimeEmitInitData(
                           Base);
     Pos++;
   }
+}
+
+void CGApproxRuntimeGPU::declareApproxInit(CodeGenFunction& CGF)
+{
+  QualType BoolTy = CGF.getContext().getIntTypeForBitwidth(8, false);
+  llvm::Type *BoolMemTy = CGF.ConvertTypeForMem(BoolTy);
+  std::string name = "approx_init";
+
+
+  // Leak, but who cares
+  ApproxInit = new GlobalVariable(CGM.getModule(), BoolMemTy, false, GlobalValue::InternalLinkage,
+                               llvm::Constant::getNullValue(BoolMemTy),
+                               name,
+                               /*InsertBefore=*/ nullptr,
+                               /*ThreadLocalMode=*/ GlobalValue::NotThreadLocal,
+                               // how do we do this better?
+                               Optional<unsigned>((unsigned) 3)
+                               );
+  ApproxInitAddress = this->getAddressofVarInAddressSpace(CGF, ApproxInit, BoolTy, clang::LangAS::cuda_shared);
+  CGF.EmitStoreOfScalar(llvm::ConstantInt::get(CGF.Int8Ty, 0, false), ApproxInitAddress, false, BoolTy, AlignmentSource::Type, false, false);
+
+}
+
+Address CGApproxRuntimeGPU::getAddressofVarInAddressSpace(CodeGenFunction &CGF, llvm::Value *V, QualType T, clang::LangAS AS)
+{
+  llvm::Type *MemType = CGF.ConvertTypeForMem(T);
+
+  return Address(
+                 CGF.Builder.CreatePointerBitCastOrAddrSpaceCast(
+                 V, MemType->getPointerTo(CGM.getContext().getTargetAddressSpace(AS))),
+                 MemType, CharUnits::fromQuantity(8));
 }
 
 Address CGApproxRuntimeGPU::declareAccessArrays(CodeGenFunction &CGF,
@@ -602,7 +599,9 @@ void CGApproxRuntimeGPU::CGApproxRuntimeEmitDataValues(CodeGenFunction &CGF) {
   sprintf(namePtr, ".dep.approx_opt_ptr.arr.addr_%d", output_arrays);
   ArrayOptPtrBase = declarePtrArrays(CGF, Outputs, namePtr);
 
-  llvm::Value *InitCheckValue = CGF.EmitLoadOfScalar(InitCheck, false, BoolTy, SourceLocation());
+  llvm::Value *InitCheckValue = CGF.EmitLoadOfScalar(getAddressofVarInAddressSpace(CGF, ApproxInit, BoolTy, clang::LangAS::cuda_shared),
+                                                     false, BoolTy, SourceLocation()
+                                                     );
   approxRTParams[DevInitDone] = InitCheckValue;
 
   llvm::Value *InitDone = CGF.Builder.CreateICmpEQ(InitCheckValue, llvm::ConstantInt::get(CGF.Int8Ty, 1));
@@ -618,7 +617,7 @@ void CGApproxRuntimeGPU::CGApproxRuntimeEmitDataValues(CodeGenFunction &CGF) {
 
   llvm::Value *NumOfElements, *InfoAddress, *PtrAddress;
   if (requiresInputs && Inputs.size() > 0) {
-    sprintf(nameInfo, ".dep.approx_inputs.arr.addr_%d", input_arrays++);
+    sprintf(nameInfo, ".dep.approx_inputs.arr.addr_%d", input_array++);
     std::tie(NumOfElements, InfoAddress) =
       CGApproxRuntimeGPUEmitData(CGF, Inputs, ArrayIptBase, nameInfo);
     approxRTParams[DevDataDescIn] = InfoAddress;

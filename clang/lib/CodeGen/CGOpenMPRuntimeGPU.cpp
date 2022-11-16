@@ -771,6 +771,12 @@ void CGOpenMPRuntimeGPU::emitKernelInit(CodeGenFunction &CGF,
   Bld.restoreIP(OMPBuilder.createTargetInit(Bld, IsSPMD));
   if (!IsSPMD)
     emitGenericVarsProlog(CGF, EST.Loc);
+
+  if(CGM.getLangOpts().Approx)
+    {
+      auto &ART = static_cast<CGApproxRuntimeGPU&>(CGM.getApproxRuntime());
+      ART.declareApproxInit(CGF);
+    }
 }
 
 void CGOpenMPRuntimeGPU::emitKernelDeinit(CodeGenFunction &CGF,

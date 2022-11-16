@@ -152,6 +152,8 @@ private:
   CodeGenModule &CGM;
 
   llvm::Value *approxRTParams[DEV_ARG_END];
+  llvm::GlobalVariable *ApproxInit = nullptr;
+  Address ApproxInitAddress = Address(nullptr, nullptr, CharUnits::Zero());
 
   // Function type of the runtime interface call.
   llvm::FunctionType *RTFnTy;
@@ -169,6 +171,8 @@ void CGApproxRuntimeEmitInitData(
                            llvm::SmallVector<std::pair<Expr *, Directionality>, 16> &Data, const char *name);
   Address declarePtrArrays(CodeGenFunction &CGF,
                            llvm::SmallVector<std::pair<Expr *, Directionality>, 16> &Data, const char *name);
+
+  Address getAddressofVarInAddressSpace(CodeGenFunction &CGF, llvm::Value *V, QualType T, clang::LangAS AS);
 
 
 std::tuple<llvm::Value *, llvm::Value*>
@@ -188,6 +192,7 @@ public:
                                    ApproxMemoClause &MemoClause) override;
   void CGApproxRuntimeExitRegion(CodeGenFunction &CGF) override;
   void CGApproxRuntimeEmitDataValues(CodeGenFunction &CG) override;
+  void declareApproxInit(CodeGenFunction& CGF);
 };
 } // namespace CodeGen
 } // namespace clang
