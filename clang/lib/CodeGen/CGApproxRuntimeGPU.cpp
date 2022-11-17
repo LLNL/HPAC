@@ -617,7 +617,7 @@ void CGApproxRuntimeGPU::CGApproxRuntimeEmitDataValues(CodeGenFunction &CGF) {
 
   llvm::Value *NumOfElements, *InfoAddress, *PtrAddress;
   if (requiresInputs && Inputs.size() > 0) {
-    sprintf(nameInfo, ".dep.approx_inputs.arr.addr_%d", input_array++);
+    sprintf(nameInfo, ".dep.approx_inputs.arr.addr_%d", input_arrays++);
     std::tie(NumOfElements, InfoAddress) =
       CGApproxRuntimeGPUEmitData(CGF, Inputs, ArrayIptBase, nameInfo);
     approxRTParams[DevDataDescIn] = InfoAddress;
