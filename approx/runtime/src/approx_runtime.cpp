@@ -642,7 +642,7 @@ void __approx_device_memo_out(void (*accurateFN)(void *), void *arg, const void 
 
   // TODO: this '8' should be the number of warps per block
   char _states [8*TAF_REGIONS_PER_WARP];
-  char _cur_index [8*TAF_REGIONS_PER_WARP];
+  int _cur_index [8*TAF_REGIONS_PER_WARP];
   int _active_values[8*TAF_REGIONS_PER_WARP];
   // TODO: Assumes <= 256 threads per block, maximum history size of 5
   // This is constant across different TAF widths
@@ -658,7 +658,7 @@ void __approx_device_memo_out(void (*accurateFN)(void *), void *arg, const void 
 
   int sm_offset = warpId * (TAF_REGIONS_PER_WARP);
   char *states = _states + sm_offset;
-  char *cur_index = _cur_index + sm_offset;
+  int *cur_index = _cur_index + sm_offset;
   int *active_values = _active_values + sm_offset;
   // TODO: again a problem if history size is not width
   sm_offset = warpId * 32*MAX_HIST_SIZE;
@@ -713,12 +713,12 @@ void __approx_device_memo_out(void (*accurateFN)(void *), void *arg, const void 
           active_values[sublaneInWarp]--;
           if (active_values[sublaneInWarp] == 0) {
             states[sublaneInWarp] = ACCURATE;
+            cur_index[sublaneInWarp] = 0;
           }
         }
     }
   else
     {
-
       accurateFN(arg);
 
       int k = cur_index[sublaneInWarp] + threadInSublane;
@@ -741,7 +741,7 @@ void __approx_device_memo_out(void (*accurateFN)(void *), void *arg, const void 
       syncWarp(myMask);
       if(threadInSublane == 0)
         {
-          cur_index[sublaneInWarp] = (k+TAF_THREAD_WIDTH) % (*RTEnvdOpt.history_size * TAF_THREAD_WIDTH);
+          cur_index[sublaneInWarp] = (cur_index[sublaneInWarp]+TAF_THREAD_WIDTH) % ((*RTEnvdOpt.history_size)* TAF_THREAD_WIDTH);
           active_values[sublaneInWarp] += 1;
         }
     }
