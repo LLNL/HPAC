@@ -624,6 +624,8 @@ __attribute__((always_inline))
 void __approx_device_memo_out(void (*accurateFN)(void *), void *arg, const void *region_info_out, const void *opt_access, void **outputs, const int nOutputs, const char init_done)
 {
   const approx_region_specification *out_reg = (const approx_region_specification*) region_info_out;
+  constexpr int TAF_REGIONS_PER_WARP = NTHREADS_PER_WARP/TAF_THREAD_WIDTH;
+  constexpr int MAX_HIST_SIZE = 5;
   approx_var_access_t *opts = (approx_var_access_t*) opt_access;
   int tid_global = omp_get_thread_num() + omp_get_team_num() * omp_get_num_threads();
   int entry_index = -1;
@@ -639,11 +641,12 @@ void __approx_device_memo_out(void (*accurateFN)(void *), void *arg, const void 
     }
 
   // TODO: this '8' should be the number of warps per block
-  char _states [8*NTHREADS_PER_WARP/TAF_THREAD_WIDTH];
-  char _cur_index [8*NTHREADS_PER_WARP/TAF_THREAD_WIDTH];
-  int _active_values[8*NTHREADS_PER_WARP/TAF_THREAD_WIDTH];
-  // TODO: This will be problematic if history size != width
-  real_t _output_table[8*32];
+  char _states [8*TAF_REGIONS_PER_WARP];
+  char _cur_index [8*TAF_REGIONS_PER_WARP];
+  int _active_values[8*TAF_REGIONS_PER_WARP];
+  // TODO: Assumes <= 256 threads per block, maximum history size of 5
+  // This is constant across different TAF widths
+  real_t _output_table[8*NTHREADS_PER_WARP*MAX_HIST_SIZE];
   #pragma omp allocate(_states) allocator(omp_pteam_mem_alloc)
   #pragma omp allocate(_cur_index) allocator(omp_pteam_mem_alloc)
   #pragma omp allocate(_active_values) allocator(omp_pteam_mem_alloc)
@@ -653,12 +656,13 @@ void __approx_device_memo_out(void (*accurateFN)(void *), void *arg, const void 
   const int sublaneInWarp = (omp_get_thread_num () % NTHREADS_PER_WARP) / TAF_THREAD_WIDTH;
   const int threadInSublane = omp_get_thread_num() % TAF_THREAD_WIDTH;
 
-  int sm_offset = warpId * (NTHREADS_PER_WARP/TAF_THREAD_WIDTH);
+  int sm_offset = warpId * (TAF_REGIONS_PER_WARP);
   char *states = _states + sm_offset;
   char *cur_index = _cur_index + sm_offset;
   int *active_values = _active_values + sm_offset;
   // TODO: again a problem if history size is not width
-  real_t *output_table = _output_table + (TAF_THREAD_WIDTH*sm_offset);
+  sm_offset = warpId * 32*MAX_HIST_SIZE;
+  real_t *output_table = _output_table + (sm_offset) + MAX_HIST_SIZE*sublaneInWarp;
 
   const unsigned int myMask = getMask(1, TAF_THREAD_WIDTH) << (TAF_THREAD_WIDTH*sublaneInWarp);
 
@@ -683,17 +687,17 @@ void __approx_device_memo_out(void (*accurateFN)(void *), void *arg, const void 
       // we subtract one because 'cur_index' is the insertion point -- we want the last value inserted
       int k =cur_index[sublaneInWarp] - 1;
       if(k<0)
-        k=(*RTEnvdOpt.history_size)-1;
+        k=(TAF_THREAD_WIDTH**RTEnvdOpt.history_size)-1;
       offset = 0;
 
       for(int j = 0; j < nOutputs; j++)
         {
           for(int i = 0; i < opts[j].num_elem; i++)
             {
-              // TODO: access index
-              size_t row_num = (k*n_output_values) + offset + i;
-              size_t col_num = sublaneInWarp;
-              size_t access_index = (row_num * NTHREADS_PER_WARP/TAF_THREAD_WIDTH) + col_num;
+              size_t row_num = (sublaneInWarp * n_output_values) + offset + i;
+              size_t col_num = k;
+              size_t access_index = (row_num * *RTEnvdOpt.history_size * TAF_THREAD_WIDTH) + col_num;
+
 
               convertFromSingleWithOffset(outputs[j], output_table, i, access_index,
                                           (ApproxType) out_reg[j].data_type);
@@ -714,6 +718,7 @@ void __approx_device_memo_out(void (*accurateFN)(void *), void *arg, const void 
     }
   else
     {
+
       accurateFN(arg);
 
       int k = cur_index[sublaneInWarp] + threadInSublane;
@@ -722,9 +727,9 @@ void __approx_device_memo_out(void (*accurateFN)(void *), void *arg, const void 
         {
           for(int i = 0; i < opts[j].num_elem; i++)
             {
-              size_t row_num = (k*n_output_values) + offset + i;
-              size_t col_num = sublaneInWarp;
-              size_t access_index = (row_num * NTHREADS_PER_WARP/TAF_THREAD_WIDTH) + col_num;
+              size_t row_num = (sublaneInWarp * n_output_values) + offset + i;
+              size_t col_num = k;
+              size_t access_index = (row_num * *RTEnvdOpt.history_size * TAF_THREAD_WIDTH) + col_num;
 
               convertToSingleWithOffset(output_table, outputs[j], access_index, i,
                                         (ApproxType) out_reg[j].data_type);
@@ -736,7 +741,7 @@ void __approx_device_memo_out(void (*accurateFN)(void *), void *arg, const void 
       syncWarp(myMask);
       if(threadInSublane == 0)
         {
-          cur_index[sublaneInWarp] = (k+TAF_THREAD_WIDTH) % (*RTEnvdOpt.history_size);
+          cur_index[sublaneInWarp] = (k+TAF_THREAD_WIDTH) % (*RTEnvdOpt.history_size * TAF_THREAD_WIDTH);
           active_values[sublaneInWarp] += 1;
         }
     }
@@ -748,16 +753,16 @@ void __approx_device_memo_out(void (*accurateFN)(void *), void *arg, const void 
       real_t variance = 0.0;
       real_t avg = 0.0;
 
-      for(int k = threadInSublane; k < *RTEnvdOpt.history_size; k += TAF_THREAD_WIDTH)
+      for(int k = threadInSublane; k < (*RTEnvdOpt.history_size*TAF_THREAD_WIDTH); k += TAF_THREAD_WIDTH)
         {
           offset = 0;
           for(int j = 0; j < nOutputs; j++)
             {
               for(int i = 0; i < opts[j].num_elem; i++)
                 {
-                  size_t row_num = (k*n_output_values) + offset + i;
-                  size_t col_num = sublaneInWarp;
-                  size_t access_index = (row_num * NTHREADS_PER_WARP/TAF_THREAD_WIDTH) + col_num;
+                  size_t row_num = (sublaneInWarp * n_output_values) + offset + i;
+                  size_t col_num = k;
+                  size_t access_index = (row_num * *RTEnvdOpt.history_size * TAF_THREAD_WIDTH) + col_num;
 
                   avg += output_table[access_index];
 
@@ -768,7 +773,7 @@ void __approx_device_memo_out(void (*accurateFN)(void *), void *arg, const void 
       avg = reduceSumImpl(myMask, avg);
 
       // average = sum / total_size
-      avg /= (real_t) (*RTEnvdOpt.history_size * n_output_values);
+      avg /= (real_t) (*RTEnvdOpt.history_size * n_output_values * TAF_THREAD_WIDTH);
 
       // for each entry in the table
       // for each value in the entry
@@ -776,16 +781,16 @@ void __approx_device_memo_out(void (*accurateFN)(void *), void *arg, const void 
       // variance += temp^2
 
 
-      for(int k = threadInSublane; k < *RTEnvdOpt.history_size; k += TAF_THREAD_WIDTH)
+      for(int k = threadInSublane; k < (*RTEnvdOpt.history_size*TAF_THREAD_WIDTH); k += TAF_THREAD_WIDTH)
         {
           offset = 0;
           for(int j = 0; j < nOutputs; j++)
             {
               for(int i = 0; i < opts[j].num_elem; i++)
                 {
-                  size_t row_num = (k*n_output_values) + offset + i;
-                  size_t col_num = sublaneInWarp;
-                  size_t access_index = (row_num * NTHREADS_PER_WARP/TAF_THREAD_WIDTH) + col_num;
+                  size_t row_num = (sublaneInWarp * n_output_values) + offset + i;
+                  size_t col_num = k;
+                  size_t access_index = (row_num * *RTEnvdOpt.history_size * TAF_THREAD_WIDTH) + col_num;
 
                   real_t tmp = output_table[access_index] - avg;
                   variance += tmp*tmp;
@@ -796,7 +801,7 @@ void __approx_device_memo_out(void (*accurateFN)(void *), void *arg, const void 
 
       // variance /= total_size
       variance = reduceSumImpl(myMask, variance);
-      variance /= (real_t)(*RTEnvdOpt.history_size * n_output_values);
+      variance /= (real_t)(*RTEnvdOpt.history_size * n_output_values * TAF_THREAD_WIDTH);
 
       real_t stdev = sqrt(variance);
       real_t rsd = stdev;
