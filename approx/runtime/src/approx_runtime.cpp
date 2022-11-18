@@ -76,6 +76,12 @@ public:
   int *window_size = nullptr;
   char *active_values = nullptr;
   char *cur_index = nullptr;
+#ifdef APPROX_DEV_STATS
+  int *accurate_count = nullptr;
+  int *approx_count = nullptr;
+  int *nthreads = nullptr;
+#endif //APPROX_DEV_STATS
+
 
 #pragma omp end declare target
 
@@ -103,6 +109,16 @@ public:
     std::fill(active_values, active_values+total_nthreads, 0);
     std::fill(cur_index, cur_index+total_nthreads, 0);
 
+
+    #ifdef APPROX_DEV_STATS
+    accurate_count = new int[total_nthreads];
+    approx_count = new int[total_nthreads];
+    nthreads = new int[1];
+    *nthreads = total_nthreads;
+    std::fill(accurate_count, accurate_count + total_nthreads, 0);
+    std::fill(approx_count, approx_count + total_nthreads, 0);
+    #endif
+
   }
 
   void destruct()
@@ -116,6 +132,11 @@ public:
     delete[] window_size;
     delete[] active_values;
     delete[] cur_index;
+    #ifdef APPROX_DEV_STATS
+    delete[] accurate_count;
+    delete[] approx_count;
+    delete[] nthreads;
+    #endif
   }
 
 #pragma omp begin declare target
@@ -258,14 +279,19 @@ void resetDeviceOutputTable(float thresh, int num_output_items_per_entry, int pS
 
   if(output_mapped)
     {
+      printf("deleting the output table\n");
       // TODO: nthreads can be different here as well
       int del_gtab_size = nthreads * num_output_items_per_entry * *RTEnvdOpt.history_size;
 #pragma omp target exit data map(delete:RTEnvdOpt, RTEnvdOpt.states[0:nthreads], RTEnvdOpt.predicted_values[0:nthreads], RTEnvdOpt.pSize[0:1], RTEnvdOpt.oTable[0:del_gtab_size], RTEnvdOpt.threshold[0:1], RTEnvdOpt.history_size[0:1], RTEnvdOpt.window_size[0:1], RTEnvdOpt.active_values[0:nthreads], RTEnvdOpt.cur_index[0:nthreads])
     }
 
   RTEnvdOpt.resetTable(thresh, num_output_items_per_entry, pSize, history_size, num_blocks, num_threads);
+  #ifdef APPROX_DEV_STATS
+  #pragma omp target enter data map(to:RTEnvdOpt, RTEnvdOpt.states[0:nthreads], RTEnvdOpt.predicted_values[0:nthreads], RTEnvdOpt.pSize[0:1], RTEnvdOpt.oTable[0:gtab_size], RTEnvdOpt.threshold[0:1], RTEnvdOpt.history_size[0:1], RTEnvdOpt.window_size[0:1], RTEnvdOpt.active_values[0:nthreads], RTEnvdOpt.cur_index[0:nthreads], RTEnvdOpt.accurate_count[0:nthreads], RTEnvdOpt.approx_count[0:nthreads], RTEnvdOpt.nthreads[0:1])
+  #else
 #pragma omp target enter data map(to:RTEnvdOpt, RTEnvdOpt.states[0:nthreads], RTEnvdOpt.predicted_values[0:nthreads], RTEnvdOpt.pSize[0:1], RTEnvdOpt.oTable[0:gtab_size], RTEnvdOpt.threshold[0:1], RTEnvdOpt.history_size[0:1], RTEnvdOpt.window_size[0:1], RTEnvdOpt.active_values[0:nthreads], RTEnvdOpt.cur_index[0:nthreads])
 
+  #endif
   output_mapped = true;
 }
 
@@ -325,9 +351,11 @@ std::pair<int*, int*> getApproxRatioInformation()
   #endif
 }
 
-void writeDeviceThreadStatistics(std::ostream& file){
+void writeDeviceThreadStatistics(std::ostream& file, bool iact){
   #ifdef APPROX_DEV_STATS
   file << "THREAD,ACCURATE,APPROX,RATIO\n";
+  if(iact)
+    {
   int nthreads = *RTEnvd.nthreads;
 #pragma omp target update from(RTEnvd.accurate_count[0:nthreads], RTEnvd.approx_count[0:nthreads])
   for(int tnum = 0; tnum < nthreads; tnum++)
@@ -339,6 +367,22 @@ void writeDeviceThreadStatistics(std::ostream& file){
            << appro << ","
            << (float) appro / (accur + appro)
            << "\n";
+    }
+    }
+  else
+    {
+  int nthreads = *RTEnvdOpt.nthreads;
+#pragma omp target update from(RTEnvdOpt.accurate_count[0:nthreads], RTEnvdOpt.approx_count[0:nthreads])
+  for(int tnum = 0; tnum < nthreads; tnum++)
+    {
+      int accur = RTEnvdOpt.accurate_count[tnum];
+      int appro = RTEnvdOpt.approx_count[tnum];
+      file << tnum << ","
+           << accur << ","
+           << appro << ","
+           << (float) appro / (accur + appro)
+           << "\n";
+    }
     }
   #endif
 }
@@ -476,10 +520,8 @@ public:
 
 
     #ifdef APPROX_DEV_STATS
-    int nThreads = numBlocks*threadsPerBlock;
-    printf("WARNING: HPAC will collect per-thread approximation statistics for %d threads, affecting runtime. For performance benchmarking, disable this feature\n", nThreads);
-    resetDeviceTable(threshold, threadsPerBlock, numBlocks, inputSize, outputSize, tableSize, nThreads, RP);
-    #else
+    printf("WARNING: HPAC will collect per-thread approximation statistics for %d threads, affecting runtime. For performance benchmarking, disable this feature\n", numBlocks*threadsPerBlock);
+    #endif  //APPROX_DEV_STATS
     if(predictionSize == -1)
       {
       resetDeviceTable(threshold, threadsPerBlock, numBlocks, inputSize, outputSize, tableSize, numBlocks*threadsPerBlock, RP);
@@ -488,7 +530,6 @@ public:
       {
         resetDeviceOutputTable(threshold, outputSize, predictionSize, historySize, windowSize, numBlocks, threadsPerBlock);
       }
-    #endif  //APPROX_DEV_STATS
 
   }
 
@@ -684,6 +725,10 @@ void __approx_device_memo_out(void (*accurateFN)(void *), void *arg, const void 
   bool am_approx = states[sublaneInWarp] == APPROX;
   if(am_approx)
     {
+      #ifdef APPROX_DEV_STATS
+      RTEnvdOpt.approx_count[tid_global]++;
+      #endif
+
       // we subtract one because 'cur_index' is the insertion point -- we want the last value inserted
       int k =cur_index[sublaneInWarp] - 1;
       if(k<0)
@@ -720,6 +765,9 @@ void __approx_device_memo_out(void (*accurateFN)(void *), void *arg, const void 
   else
     {
       accurateFN(arg);
+      #ifdef APPROX_DEV_STATS
+      RTEnvdOpt.accurate_count[tid_global]++;
+      #endif
 
       int k = cur_index[sublaneInWarp] + threadInSublane;
       offset = 0;

@@ -29,6 +29,6 @@ float getDeviceThreshold();
   float getApproxRatioForThread(int threadNum);
 std::pair<int*, int*> getApproxRatioInformation();
 #ifdef APPROX_DEV_STATS
-void writeDeviceThreadStatistics(std::ostream& file);
+void writeDeviceThreadStatistics(std::ostream& file, bool iact = true);
 #endif
 #endif // APPROX_DEBUG_HH_INCLUDED
