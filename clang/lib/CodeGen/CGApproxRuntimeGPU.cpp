@@ -339,8 +339,6 @@ void CGApproxRuntimeGPU::CGApproxRuntimeEmitPerfoFn(
   CodeGenFunction::CGCapturedStmtRAII CapInfoRAII(CGF, &CGSI);
 
   llvm::Function *Fn = CGF.GeneratePerfoCapturedStmtFunction(CS, LoopExprs, PC);
-  PerfoFnVal = Fn;
-  llvm::dbgs() << "Outputting ferfo function init\n";
   approxRTParams[DevPerfoFn] =
       CGF.Builder.CreatePointerCast(Fn, CallbackFnTy->getPointerTo());
   return;
