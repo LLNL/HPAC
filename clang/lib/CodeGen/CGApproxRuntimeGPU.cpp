@@ -19,6 +19,7 @@
 #include "clang/Basic/Approx.h"
 #include "clang/Basic/AddressSpaces.h"
 #include "llvm/ADT/SmallVector.h"
+#include "llvm/IR/Constants.h"
 #include "llvm/Support/Debug.h"
 #include "CGOpenMPRuntime.h"
 #include <tuple>
@@ -250,6 +251,7 @@ CGApproxRuntimeGPU::CGApproxRuntimeGPU(CodeGenModule &CGM)
   RTFnTy = llvm::FunctionType::get(CGM.VoidTy,
                                          {
                                            /* Orig. fn ptr*/ llvm::PointerType::getUnqual(CallbackFnTy),
+                                           /* Perfo fn ptr*/ llvm::PointerType::getUnqual(CallbackFnTy),
                                            /* Captured data ptr*/ CGM.VoidPtrTy,
                                            /* Memoization Type */ CGM.Int32Ty,
                                            /* Input Data Descr. */ CGM.VoidPtrTy,
@@ -299,14 +301,18 @@ void CGApproxRuntimeGPU::CGApproxRuntimeEnterRegion(CodeGenFunction &CGF,
   /// EmitClause* Will replace as necessary
   approxRTParams[DevAccurateFn] =
     CGF.Builder.CreatePointerCast(Fn, CallbackFnTy->getPointerTo());
+  approxRTParams[DevPerfoFn] = llvm::ConstantPointerNull::get(
+      llvm::PointerType::getUnqual(CallbackFnTy));
   approxRTParams[DevCapDataPtr] =
       CGF.Builder.CreatePointerCast(CapStructAddr.getPointer(), CGM.VoidPtrTy);
   approxRTParams[DevDataDescIn] = llvm::ConstantPointerNull::get(CGM.VoidPtrTy);
   approxRTParams[DevAccessDescIn] = llvm::ConstantPointerNull::get(CGM.VoidPtrTy);
+  approxRTParams[DevDataPtrIn] = llvm::ConstantPointerNull::get(CGM.VoidPtrTy);
   approxRTParams[DevDataSizeIn] =
       llvm::ConstantInt::get(CGF.Builder.getInt32Ty(), 0);
   approxRTParams[DevDataDescOut] = llvm::ConstantPointerNull::get(CGM.VoidPtrTy);
   approxRTParams[DevAccessDescOut] = llvm::ConstantPointerNull::get(CGM.VoidPtrTy);
+  approxRTParams[DevDataPtrOut] = llvm::ConstantPointerNull::get(CGM.VoidPtrTy);
   approxRTParams[DevDataSizeOut] =
       llvm::ConstantInt::get(CGF.Builder.getInt32Ty(), 0);
   approxRTParams[DevMemoDescr] =
@@ -316,6 +322,30 @@ void CGApproxRuntimeGPU::CGApproxRuntimeEnterRegion(CodeGenFunction &CGF,
   EndLoc = CS.getEndLoc();
   return;
 }
+
+// TODO: Should we add LoopExprs to the PerfoClause?
+void CGApproxRuntimeGPU::CGApproxRuntimeEmitPerfoInit(
+    CodeGenFunction &CGF, CapturedStmt &CS, ApproxPerfoClause &PerfoClause, const ApproxLoopHelperExprs &LoopExprs) {
+  // we don't use any perfo metadata at this point -- can be added later as needed
+  /// Emit Function which needs to be perforated.
+  CGApproxRuntimeEmitPerfoFn(CS, LoopExprs, PerfoClause);
+}
+
+void CGApproxRuntimeGPU::CGApproxRuntimeEmitPerfoFn(
+    CapturedStmt &CS, const ApproxLoopHelperExprs &LoopExprs,
+    const ApproxPerfoClause &PC) {
+  CodeGenFunction::CGCapturedStmtInfo CGSI(CS);
+  CodeGenFunction CGF(CGM, true);
+  CodeGenFunction::CGCapturedStmtRAII CapInfoRAII(CGF, &CGSI);
+
+  llvm::Function *Fn = CGF.GeneratePerfoCapturedStmtFunction(CS, LoopExprs, PC);
+  PerfoFnVal = Fn;
+  llvm::dbgs() << "Outputting ferfo function init\n";
+  approxRTParams[DevPerfoFn] =
+      CGF.Builder.CreatePointerCast(Fn, CallbackFnTy->getPointerTo());
+  return;
+}
+
 
 void CGApproxRuntimeGPU::CGApproxRuntimeEmitMemoInit(
     CodeGenFunction &CGF, ApproxMemoClause &MemoClause) {
@@ -337,7 +367,7 @@ void CGApproxRuntimeGPU::CGApproxRuntimeEmitMemoInit(
 
 void CGApproxRuntimeGPU::CGApproxRuntimeExitRegion(CodeGenFunction &CGF) {
   Function *RTFnDev = nullptr;
-  StringRef RTFnName("__approx_device_memo");
+  StringRef RTFnName("__approx_device_exec_call");
   RTFnDev = CGM.getModule().getFunction(RTFnName);
 
   assert(RTFnTy != nullptr);
