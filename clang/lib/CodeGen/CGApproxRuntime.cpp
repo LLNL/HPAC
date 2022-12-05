@@ -12,6 +12,7 @@
 
 #include "CGApproxRuntime.h"
 #include "CodeGenFunction.h"
+#include "clang/AST/ASTFwd.h"
 #include "clang/AST/ApproxClause.h"
 #include "clang/AST/Expr.h"
 #include "clang/AST/Stmt.h"
@@ -486,7 +487,8 @@ llvm::Function *CodeGenFunction::GeneratePerfoCapturedStmtFunction(
   }
 
   if(LoopExprs.OMPParallelForDir) {
-    EmitStmt(LoopExprs.OMPParallelForDir);
+    auto *FF = dyn_cast<OMPTargetTeamsDistributeParallelForDirective>(LoopExprs.OMPParallelForDir);
+    EmitStmt(FF);
   }
   else {
     // Create BBs for end of the loop and condition check.
@@ -591,9 +593,9 @@ llvm::Function *CodeGenFunction::GeneratePerfoCapturedStmtFunction(
       EmitStmt(LoopExprs.PerfoSkip);
     Stmt *S = const_cast<Stmt *>(CS.getCapturedStmt());
     Stmt *LoopS = nullptr;
-    OMPParallelForDirective *OMPFD = nullptr;
-    if ((OMPFD = dyn_cast<OMPParallelForDirective>(S)))
-      LoopS = OMPFD->getAssociatedStmt()->IgnoreContainers(true);
+    OMPTargetTeamsDistributeParallelForDirective *OMPFD = nullptr;
+    if ((OMPFD = dyn_cast<OMPTargetTeamsDistributeParallelForDirective>(S)))
+      LoopS = OMPFD->getInnermostCapturedStmt()->IgnoreContainers(true);
     else
       LoopS = S->IgnoreContainers();
     emitBody(emitBody, S, LoopS);

@@ -6112,7 +6112,6 @@ void CGOpenMPRuntime::emitTargetOutlinedFunctionHelper(
         CodeGenFunction::CGCapturedStmtRAII CapInfoRAII(CGF, &CGInfo);
         return CGF.GenerateOpenMPCapturedStmtFunction(CS, D.getBeginLoc());
       };
-
   // Get NumTeams and ThreadLimit attributes
   int32_t DefaultValTeams = -1;
   int32_t DefaultValThreads = -1;
@@ -10110,8 +10109,13 @@ void CGOpenMPRuntime::scanForTargetRegionsFunctions(const Stmt *S,
   Stmt *Ss = const_cast<Stmt*>(S);
   if(ApproxDirective *AD = dyn_cast<ApproxDirective>(Ss))
     {
+      // We need to do codegen for the exact kernel the approx statement captures
       CapturedStmt *CStmt = cast<CapturedStmt>(AD->getAssociatedStmt());
       const auto *E = cast<OMPExecutableDirective>(CStmt->getCapturedStmt());
+      scanForTargetRegionsFunctions(E, ParentName);
+
+      // We need to do codegen for the approx kernel we generated for perforation
+      E = cast<OMPExecutableDirective>(AD->LoopExprs.OMPParallelForDir);
       scanForTargetRegionsFunctions(E, ParentName);
       return;
     }
