@@ -1852,7 +1852,6 @@ StmtResult Sema::ActOnApproxDirective(Stmt *AssociatedStmt,
       Stmt *LoopStmt = nullptr;
       if ((OMPLoopDir = dyn_cast<OMPLoopDirective>(AssociatedStmt))) {
         LoopStmt = OMPLoopDir->getInnermostCapturedStmt()->IgnoreContainers(true);
-        llvm::dbgs() << "LoopStmt class name is: " << LoopStmt->getStmtClassName() << "\n";
       } else {
         LoopStmt = AssociatedStmt;
         B.OMPParallelForDir = nullptr;
