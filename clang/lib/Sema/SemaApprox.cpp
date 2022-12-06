@@ -1846,27 +1846,13 @@ StmtResult Sema::ActOnApproxDirective(Stmt *AssociatedStmt,
   CapturedStmt *CS = nullptr;
   ApproxLoopHelperExprs B;
   OMPLoopDirective *OMPLoopDir = nullptr;
-  OMPTargetTeamsDistributeParallelForDirective *OMPTTDPFDir = nullptr;
-
-  auto DKind = OpenMPDirectiveKind::OMPD_target_teams_distribute_parallel_for;
-  SmallVector<OpenMPDirectiveKind, 4> CaptureRegions;
-  getOpenMPCaptureRegions(CaptureRegions, DKind);
-
-  DKind = OpenMPDirectiveKind::OMPD_parallel_for;
-  CaptureRegions.clear();
-  getOpenMPCaptureRegions(CaptureRegions, DKind);
 
   for(const auto &AC : Clauses) {
     if(AC->getClauseKind() == CK_PERFO) {
       Stmt *LoopStmt = nullptr;
-      // we have to drill down to the for stmt
-           if((OMPTTDPFDir = dyn_cast<OMPTargetTeamsDistributeParallelForDirective>(AssociatedStmt))) {
-             LoopStmt = OMPTTDPFDir->getInnermostCapturedStmt()->IgnoreContainers(true);
-          const CapturedStmt *CSS = OMPTTDPFDir->getCapturedStmt(OpenMPDirectiveKind::OMPD_parallel);
-          OMPLoopDir = dyn_cast<OMPLoopDirective>(const_cast<CapturedStmt*>(CSS));
-
-      } else if ((OMPLoopDir = dyn_cast<OMPLoopDirective>(AssociatedStmt))) {
-        LoopStmt = OMPLoopDir->getAssociatedStmt()->IgnoreContainers(true);
+      if ((OMPLoopDir = dyn_cast<OMPLoopDirective>(AssociatedStmt))) {
+        LoopStmt = OMPLoopDir->getInnermostCapturedStmt()->IgnoreContainers(true);
+        llvm::dbgs() << "LoopStmt class name is: " << LoopStmt->getStmtClassName() << "\n";
       } else {
         LoopStmt = AssociatedStmt;
         B.OMPParallelForDir = nullptr;
@@ -2078,15 +2064,15 @@ StmtResult Sema::ActOnApproxDirective(Stmt *AssociatedStmt,
     }
   }
 
-  if (OMPTTDPFDir) {
+  if (OMPLoopDir) {
     ASTContext &Context = getASTContext();
     SmallVector<clang::OMPClause *, 8> OMPClauses;
-    for (unsigned i = 0; i < OMPTTDPFDir->getNumClauses(); i++)
+    for (unsigned i = 0; i < OMPLoopDir->getNumClauses(); i++)
       {
-      OMPClauses.push_back(OMPTTDPFDir->getClause(i));
+      OMPClauses.push_back(OMPLoopDir->getClause(i));
       }
 
-    const CapturedStmt *OMPCap = cast<CapturedStmt>(OMPTTDPFDir->getInnermostCapturedStmt());
+    const CapturedStmt *OMPCap = cast<CapturedStmt>(OMPLoopDir->getInnermostCapturedStmt());
     auto BuildOMPParallelFor = [&]() {
       auto *DRE = cast<DeclRefExpr>(B.IterationVarRef);
       BuildDeclRefExpr(DRE->getDecl(), DRE->getDecl()->getType(),
@@ -2129,7 +2115,7 @@ StmtResult Sema::ActOnApproxDirective(Stmt *AssociatedStmt,
       }
 
       SmallVector<Stmt *, 8> StmtList;
-      Stmt *LoopStmt = OMPTTDPFDir->getInnermostCapturedStmt()->IgnoreContainers(true); // OMPLoopDir->getAssociatedStmt()->IgnoreContainers(true);
+      Stmt *LoopStmt = OMPLoopDir->getInnermostCapturedStmt()->IgnoreContainers(true);
       Stmt *LoopBody = nullptr;
       if (auto *For = dyn_cast<ForStmt>(LoopStmt)) {
         LoopBody = For->getBody();
@@ -2162,14 +2148,14 @@ StmtResult Sema::ActOnApproxDirective(Stmt *AssociatedStmt,
       return NewForStmtRes;
     };
 
-    StartOpenMPDSABlock(OpenMPDirectiveKind::OMPD_target_teams_distribute_parallel_for, DeclarationNameInfo(),
+    StartOpenMPDSABlock(OMPLoopDir->getDirectiveKind(), DeclarationNameInfo(),
                         getCurScope(), SourceLocation());
 
-    ActOnOpenMPRegionStart(OpenMPDirectiveKind::OMPD_target_teams_distribute_parallel_for, getCurScope());
+    ActOnOpenMPRegionStart(OMPLoopDir->getDirectiveKind(), getCurScope());
     StmtResult CompStmtRes = BuildOMPParallelFor();
     StmtResult OMPCSRes = ActOnOpenMPRegionEnd(CompStmtRes, OMPClauses);
     StmtResult OMPParForDirRes = ActOnOpenMPExecutableDirective(
-        OpenMPDirectiveKind::OMPD_target_teams_distribute_parallel_for, DeclarationNameInfo(), OMPD_unknown,
+        OMPLoopDir->getDirectiveKind(), DeclarationNameInfo(), OMPD_unknown,
         OMPClauses, OMPCSRes.get(), Locs.StartLoc, Locs.EndLoc);
 
     EndOpenMPDSABlock(OMPParForDirRes.get());
