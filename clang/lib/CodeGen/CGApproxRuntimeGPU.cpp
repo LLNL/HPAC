@@ -595,7 +595,7 @@ void CGApproxRuntimeGPU::CGApproxRuntimeEmitDataValues(CodeGenFunction &CGF) {
   QualType BoolTy = C.getIntTypeForBitwidth(8, false);
   // any way to have actual bool?
   auto &OMPRT = static_cast<CGOpenMPRuntimeGPU &>(CGF.CGM.getOpenMPRuntime());
-  Address InitCheck = OMPRT.ApproxInitCheck;
+  Address InitCheck = *OMPRT.ApproxInitCheck;
 
   llvm::BasicBlock *CheckBody = CGF.createBasicBlock("approx.check_init");
   llvm::BasicBlock *StoreBody = CGF.createBasicBlock("approx.init_vars");

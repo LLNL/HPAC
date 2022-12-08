@@ -229,7 +229,7 @@ public:
 class CGOpenMPRuntime {
 public:
   // we need to store info for approx runtime that we can access later
-  Address ApproxInitCheck = Address(nullptr, nullptr, CharUnits::Zero());
+  Address *ApproxInitCheck = nullptr;
   /// Allows to disable automatic handling of functions used in target regions
   /// as those marked as `omp declare target`.
   class DisableAutoDeclareTargetRAII {

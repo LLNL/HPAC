@@ -2788,7 +2788,7 @@ void CGOpenMPRuntime::emitForStaticInit(CodeGenFunction &CGF,
   QualType BoolTy = C.getIntTypeForBitwidth(8, false);
   Address InitCheck = CGF.CreateMemTemp(BoolTy);
   CGF.EmitStoreOfScalar(llvm::ConstantInt::get(CGF.Int8Ty, 0, false), InitCheck, false, BoolTy, AlignmentSource::Type, true, false);
-  ApproxInitCheck = InitCheck;
+  ApproxInitCheck = new Address(InitCheck);
   llvm::Value *ThreadId = getThreadID(CGF, Loc);
   llvm::FunctionCallee StaticInitFunction =
       createForStaticInitFunction(Values.IVSize, Values.IVSigned, false);
