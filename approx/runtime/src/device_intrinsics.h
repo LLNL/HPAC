@@ -2,6 +2,8 @@
 #define DEVICE_INTRINSICS_HH_INCLUDED
 #include <algorithm>
 #pragma omp begin declare target
+namespace approx {
+  namespace intr {
 void syncThreadsAligned(){};
 unsigned int warpReduceMax(unsigned mask, unsigned int value) {return 0;}
 unsigned int warpBallot(unsigned int mask, bool pred) { return 0;}
@@ -58,5 +60,6 @@ float reduceSumImpl(unsigned int mask, float value)
 
 
 #pragma omp end declare variant
-
+  }
+}
 #endif
