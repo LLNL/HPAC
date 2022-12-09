@@ -448,8 +448,8 @@ std::unique_ptr<Address> CGApproxRuntimeGPU::declareAccessArrays(CodeGenFunction
   ASTContext &C = CGM.getContext();
 
   llvm::SmallVector<llvm::Type*, 3> AITypes{CGF.SizeTy, CGF.SizeTy};
-  llvm::StructType *AccessInfoStructTy = llvm::StructType::get(CGM.getLLVMContext(),
-                                                               AITypes);
+  // llvm::StructType *AccessInfoStructTy = llvm::StructType::get(CGM.getLLVMContext(),
+  //                                                              AITypes);
 
   QualType VarPtrArrayTy = C.getConstantArrayType(VarAccessTy, llvm::APInt(64, numVars),
                                           nullptr, ArrayType::Normal, 0);
@@ -543,8 +543,9 @@ CGApproxRuntimeGPU::CGApproxRuntimeGPUEmitData(
   }
 
   llvm::SmallVector<llvm::Type*, 3> STTypes{CGF.SizeTy, CGF.Int8Ty, CGF.Int8Ty};
-  llvm::StructType *VarSpecStructType = llvm::StructType::get(CGM.getLLVMContext(),
+  llvm::StructType *VarSpecStructType = llvm::StructType::create(CGM.getLLVMContext(),
                                                               STTypes);
+  VarSpecStructType->setName("approx_region_specification");
   llvm::ArrayType *SpecStructArrTy = llvm::ArrayType::get(VarSpecStructType, numVars);
   std::vector<llvm::Constant *> InitStructs;
   // Create each struct individually
@@ -557,7 +558,7 @@ CGApproxRuntimeGPU::CGApproxRuntimeGPUEmitData(
   // Leak, but who cares
   RegionInfo = new GlobalVariable(CGM.getModule(), SpecStructArrTy, true, GlobalValue::InternalLinkage,
                                   InitArray,
-                                  "",
+                                  infoName,
                                   /*InsertBefore=*/ nullptr,
                                   /*ThreadLocalMode=*/ GlobalValue::NotThreadLocal,
                                   // how do we do this better?
