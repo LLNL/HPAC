@@ -137,7 +137,7 @@ private:
     unsigned char tVCM = thisValue | clockMask;
 
     unsigned int thisValueInt = (unsigned int) tVCM;
-    auto insertionIdx = ffs(~thisValueInt);
+    auto insertionIdx = approx::intr::ffs(~thisValueInt);
 
     unsigned char mask = getMask(insertionIdx, 8);
     unsigned char firstMasked = thisValue & mask;
