@@ -446,21 +446,14 @@ std::unique_ptr<Address> CGApproxRuntimeGPU::declareAccessArrays(CodeGenFunction
 
   int numVars = Data.size();
   ASTContext &C = CGM.getContext();
-  // QualType VarAccessArrayTy;
-
-  // VarAccessArrayTy = C.getConstantArrayType(VarAccessTy, llvm::APInt(64, numVars),
-  //                                        nullptr, ArrayType::Normal, 0);
 
   llvm::SmallVector<llvm::Type*, 3> AITypes{CGF.SizeTy, CGF.SizeTy};
   llvm::StructType *AccessInfoStructTy = llvm::StructType::get(CGM.getLLVMContext(),
                                                                AITypes);
-  AccessInfoStructTy->setName("approx_var_access_t");
-  llvm::ArrayType *AccessStArrTy = llvm::ArrayType::get(AccessInfoStructTy, numVars);
 
   QualType VarPtrArrayTy = C.getConstantArrayType(VarAccessTy, llvm::APInt(64, numVars),
                                           nullptr, ArrayType::Normal, 0);
   llvm::Type *MemType = CGF.ConvertTypeForMem(VarPtrArrayTy);
-  auto *RD = VarPtrArrayTy->getAsRecordDecl();
 
   // Leak, but who cares
   AccessInfo = new GlobalVariable(CGM.getModule(), MemType, false, GlobalValue::InternalLinkage,
@@ -476,8 +469,6 @@ std::unique_ptr<Address> CGApproxRuntimeGPU::declareAccessArrays(CodeGenFunction
                  CGF.Builder.CreatePointerBitCastOrAddrSpaceCast(
                  AccessInfo, MemType->getPointerTo(CGM.getContext().getTargetAddressSpace(clang::LangAS::cuda_shared))),
                  MemType, CharUnits::fromQuantity(8));
-  // Address VarAccessArray = CGF.CreateMemTemp(VarAccessArrayTy, name);
-  // return VarAccessArray;
 }
 
 std::unique_ptr<Address> CGApproxRuntimeGPU::declarePtrArrays(CodeGenFunction &CGF,
