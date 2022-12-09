@@ -22,6 +22,7 @@
 #include "clang/Basic/SourceLocation.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/IR/GlobalVariable.h"
+#include <memory>
 
 namespace clang {
 namespace CodeGen {
@@ -168,9 +169,9 @@ protected:
 void CGApproxRuntimeEmitInitData(
   CodeGenFunction &CGF,
   llvm::SmallVector<std::pair<Expr *, Directionality>, 16> &Data, Address Base);
-  Address declareAccessArrays(CodeGenFunction &CGF,
+  std::unique_ptr<Address> declareAccessArrays(CodeGenFunction &CGF,
                            llvm::SmallVector<std::pair<Expr *, Directionality>, 16> &Data, const char *name);
-  Address declarePtrArrays(CodeGenFunction &CGF,
+  std::unique_ptr<Address> declarePtrArrays(CodeGenFunction &CGF,
                            llvm::SmallVector<std::pair<Expr *, Directionality>, 16> &Data, const char *name);
 
   Address getAddressofVarInAddressSpace(CodeGenFunction &CGF, llvm::Value *V, QualType T, clang::LangAS AS);

@@ -441,7 +441,7 @@ Address CGApproxRuntimeGPU::getAddressofVarInAddressSpace(CodeGenFunction &CGF, 
                  MemType, CharUnits::fromQuantity(8));
 }
 
-Address CGApproxRuntimeGPU::declareAccessArrays(CodeGenFunction &CGF,
+std::unique_ptr<Address> CGApproxRuntimeGPU::declareAccessArrays(CodeGenFunction &CGF,
     llvm::SmallVector<std::pair<Expr *, Directionality>, 16> &Data, const char *name) {
 
   int numVars = Data.size();
@@ -472,7 +472,7 @@ Address CGApproxRuntimeGPU::declareAccessArrays(CodeGenFunction &CGF,
                                   Optional<unsigned>((unsigned) 3)
                                   );
 
-  return Address(
+  return std::make_unique<Address>(
                  CGF.Builder.CreatePointerBitCastOrAddrSpaceCast(
                  AccessInfo, MemType->getPointerTo(CGM.getContext().getTargetAddressSpace(clang::LangAS::cuda_shared))),
                  MemType, CharUnits::fromQuantity(8));
@@ -480,7 +480,7 @@ Address CGApproxRuntimeGPU::declareAccessArrays(CodeGenFunction &CGF,
   // return VarAccessArray;
 }
 
-Address CGApproxRuntimeGPU::declarePtrArrays(CodeGenFunction &CGF,
+std::unique_ptr<Address> CGApproxRuntimeGPU::declarePtrArrays(CodeGenFunction &CGF,
     llvm::SmallVector<std::pair<Expr *, Directionality>, 16> &Data, const char *name) {
 
   int numVars = Data.size();
@@ -491,7 +491,7 @@ Address CGApproxRuntimeGPU::declarePtrArrays(CodeGenFunction &CGF,
                                          nullptr, ArrayType::Normal, 0);
 
   Address VarPtrArray = CGF.CreateMemTemp(VarPtrArrayTy, name);
-  return VarPtrArray;
+  return std::make_unique<Address>(VarPtrArray);
 }
 
 
@@ -604,11 +604,11 @@ void CGApproxRuntimeGPU::CGApproxRuntimeEmitDataValues(CodeGenFunction &CGF) {
   llvm::BasicBlock *Synchronize = CGF.createBasicBlock("approx.sync_after_store");
   CGF.EmitBranch(CheckBody);
 
-  Address ArrayIptBase{nullptr, nullptr, CharUnits::Zero()};
-  Address ArrayOptBase{nullptr, nullptr, CharUnits::Zero()};
+  std::unique_ptr<Address> ArrayIptBase;
+  std::unique_ptr<Address> ArrayOptBase;
 
-  Address ArrayIptPtrBase{nullptr, nullptr, CharUnits::Zero()};
-  Address ArrayOptPtrBase{nullptr, nullptr, CharUnits::Zero()};
+  std::unique_ptr<Address> ArrayIptPtrBase;
+  std::unique_ptr<Address> ArrayOptPtrBase;
 
  CGF.EmitBlock(CheckBody);
 
@@ -647,21 +647,21 @@ void CGApproxRuntimeGPU::CGApproxRuntimeEmitDataValues(CodeGenFunction &CGF) {
   if (requiresInputs && Inputs.size() > 0) {
     sprintf(nameInfo, ".dep.approx_inputs.arr.addr_%d", input_arrays++);
     std::tie(NumOfElements, InfoAddress) =
-      CGApproxRuntimeGPUEmitData(CGF, Inputs, ArrayIptBase, nameInfo);
+      CGApproxRuntimeGPUEmitData(CGF, Inputs, *ArrayIptBase, nameInfo);
     approxRTParams[DevDataDescIn] = InfoAddress;
-    approxRTParams[DevDataPtrIn] = CGF.Builder.CreatePointerBitCastOrAddrSpaceCast(ArrayIptPtrBase.getPointer(), CGF.VoidPtrTy);
+    approxRTParams[DevDataPtrIn] = CGF.Builder.CreatePointerBitCastOrAddrSpaceCast(ArrayIptPtrBase->getPointer(), CGF.VoidPtrTy);
     approxRTParams[DevAccessDescIn] = CGF.Builder.CreatePointerBitCastOrAddrSpaceCast(
-                            ArrayIptBase.getPointer(), CGF.VoidPtrTy);
+                            ArrayIptBase->getPointer(), CGF.VoidPtrTy);
     approxRTParams[DevDataSizeIn] = NumOfElements;
   }
 
   // All approximation techniques require the output
   sprintf(nameInfo, ".dep.approx_outputs.arr.addr_%d", output_arrays++);
   std::tie(NumOfElements, InfoAddress) =
-    CGApproxRuntimeGPUEmitData(CGF, Outputs, ArrayOptBase, nameInfo);
+    CGApproxRuntimeGPUEmitData(CGF, Outputs, *ArrayOptBase, nameInfo);
   approxRTParams[DevDataDescOut] = InfoAddress;
-  approxRTParams[DevAccessDescOut] = CGF.Builder.CreatePointerBitCastOrAddrSpaceCast(ArrayOptBase.getPointer(), CGF.VoidPtrTy);
-  approxRTParams[DevDataPtrOut] = CGF.Builder.CreatePointerBitCastOrAddrSpaceCast(ArrayOptPtrBase.getPointer(), CGF.VoidPtrTy);
+  approxRTParams[DevAccessDescOut] = CGF.Builder.CreatePointerBitCastOrAddrSpaceCast(ArrayOptBase->getPointer(), CGF.VoidPtrTy);
+  approxRTParams[DevDataPtrOut] = CGF.Builder.CreatePointerBitCastOrAddrSpaceCast(ArrayOptPtrBase->getPointer(), CGF.VoidPtrTy);
   approxRTParams[DevDataSizeOut] = NumOfElements;
 
   CGF.EmitBranch(Synchronize);
@@ -674,7 +674,7 @@ void CGApproxRuntimeGPU::CGApproxRuntimeEmitDataValues(CodeGenFunction &CGF) {
   CGF.EmitBlock(ContinueBody);
 
   if(requiresInputs && Inputs.size() > 0) {
-    CGApproxRuntimeEmitInitData(CGF, Inputs, ArrayIptPtrBase);
+    CGApproxRuntimeEmitInitData(CGF, Inputs, *ArrayIptPtrBase);
   }
-  CGApproxRuntimeEmitInitData(CGF, Outputs, ArrayOptPtrBase);
+  CGApproxRuntimeEmitInitData(CGF, Outputs, *ArrayOptPtrBase);
 }
