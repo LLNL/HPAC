@@ -163,13 +163,12 @@ getPointerAndSize(CodeGenFunction &CGF, const Expr *E) {
     // Get the stride integer value.
     const Expr *StrideExpr = ASE->getStride();
     Expr::EvalResult StrideResult;
-    if(!StrideExpr)
-      {
+    if(!StrideExpr) {
         Stride = llvm::ConstantInt::get(CGF.Int64Ty, 1);
       }
     else {
-    Stride = CGF.Builder.CreateIntCast(CGF.EmitScalarExpr(StrideExpr),
-                                       CGF.Int64Ty, /*isSigned=*/false);
+      Stride = CGF.Builder.CreateIntCast(CGF.EmitScalarExpr(StrideExpr),
+                                         CGF.Int64Ty, /*isSigned=*/false);
     }
 
   } else {
@@ -382,7 +381,7 @@ void CGApproxRuntimeGPU::CGApproxRuntimeExitRegion(CodeGenFunction &CGF) {
   // Signal now that we have initialized any runtime state -- allows us to check this value in the runtime function call
   //TODO: clean this up
   QualType BoolTy = CGF.getContext().getIntTypeForBitwidth(8, false);
-  CGF.EmitStoreOfScalar(llvm::ConstantInt::get(CGF.Int8Ty, 1, false), ApproxInitAddress, false, BoolTy, AlignmentSource::Type, false, false);
+  CGF.EmitStoreOfScalar(llvm::ConstantInt::get(CGF.Int8Ty, 1, false), *ApproxInitAddress, false, BoolTy, AlignmentSource::Type, false, false);
 }
 
 void CGApproxRuntimeGPU::CGApproxRuntimeEmitInitData(
@@ -424,10 +423,10 @@ void CGApproxRuntimeGPU::declareApproxInit(CodeGenFunction& CGF)
                                /*InsertBefore=*/ nullptr,
                                /*ThreadLocalMode=*/ GlobalValue::NotThreadLocal,
                                // how do we do this better?
-                               Optional<unsigned>((unsigned) 3)
+                                  CGM.getContext().getTargetAddressSpace(clang::LangAS::cuda_shared)
                                );
-  ApproxInitAddress = this->getAddressofVarInAddressSpace(CGF, ApproxInit, BoolTy, clang::LangAS::cuda_shared);
-  CGF.EmitStoreOfScalar(llvm::ConstantInt::get(CGF.Int8Ty, 0, false), ApproxInitAddress, false, BoolTy, AlignmentSource::Type, false, false);
+  ApproxInitAddress = std::make_unique<Address>(this->getAddressofVarInAddressSpace(CGF, ApproxInit, BoolTy, clang::LangAS::cuda_shared));
+  CGF.EmitStoreOfScalar(llvm::ConstantInt::get(CGF.Int8Ty, 0, false), *ApproxInitAddress, false, BoolTy, AlignmentSource::Type, false, false);
 
 }
 
@@ -438,7 +437,8 @@ Address CGApproxRuntimeGPU::getAddressofVarInAddressSpace(CodeGenFunction &CGF, 
   return Address(
                  CGF.Builder.CreatePointerBitCastOrAddrSpaceCast(
                  V, MemType->getPointerTo(CGM.getContext().getTargetAddressSpace(AS))),
-                 MemType, CharUnits::fromQuantity(8));
+                 MemType, CGM.getContext().getPreferredTypeAlignInChars(T)
+                 );
 }
 
 std::unique_ptr<Address> CGApproxRuntimeGPU::declareAccessArrays(CodeGenFunction &CGF,
@@ -446,14 +446,16 @@ std::unique_ptr<Address> CGApproxRuntimeGPU::declareAccessArrays(CodeGenFunction
 
   int numVars = Data.size();
   ASTContext &C = CGM.getContext();
-
   llvm::SmallVector<llvm::Type*, 3> AITypes{CGF.SizeTy, CGF.SizeTy};
-  // llvm::StructType *AccessInfoStructTy = llvm::StructType::get(CGM.getLLVMContext(),
-  //                                                              AITypes);
+  llvm::StructType *AccessInfoStructTy = llvm::StructType::create(CGM.getLLVMContext(),
+                                                               AITypes);
+  AccessInfoStructTy->setName("approx_var_access_t");
+  llvm::ArrayType *AccessStArrTy = llvm::ArrayType::get(AccessInfoStructTy, numVars);
 
   QualType VarPtrArrayTy = C.getConstantArrayType(VarAccessTy, llvm::APInt(64, numVars),
                                           nullptr, ArrayType::Normal, 0);
   llvm::Type *MemType = CGF.ConvertTypeForMem(VarPtrArrayTy);
+  auto *RD = VarPtrArrayTy->getAsRecordDecl();
 
   // Leak, but who cares
   AccessInfo = new GlobalVariable(CGM.getModule(), MemType, false, GlobalValue::InternalLinkage,
@@ -462,13 +464,13 @@ std::unique_ptr<Address> CGApproxRuntimeGPU::declareAccessArrays(CodeGenFunction
                                   /*InsertBefore=*/ nullptr,
                                   /*ThreadLocalMode=*/ GlobalValue::NotThreadLocal,
                                   // how do we do this better?
-                                  Optional<unsigned>((unsigned) 3)
+                                  CGM.getContext().getTargetAddressSpace(clang::LangAS::cuda_shared)
                                   );
 
   return std::make_unique<Address>(
                  CGF.Builder.CreatePointerBitCastOrAddrSpaceCast(
                  AccessInfo, MemType->getPointerTo(CGM.getContext().getTargetAddressSpace(clang::LangAS::cuda_shared))),
-                 MemType, CharUnits::fromQuantity(8));
+                 MemType, CGM.getContext().getPreferredTypeAlignInChars(VarPtrArrayTy));
 }
 
 std::unique_ptr<Address> CGApproxRuntimeGPU::declarePtrArrays(CodeGenFunction &CGF,
@@ -530,7 +532,7 @@ CGApproxRuntimeGPU::CGApproxRuntimeGPUEmitData(
     // Store STRIDE
     LValue strideElemLVal = CGF.EmitLValueForField(
         Base, *std::next(VarPtrRecord->field_begin(), STRIDE));
-    CGF.EmitStoreOfScalar(AccessStride, strideElemLVal);
+    // CGF.EmitStoreOfScalar(AccessStride, strideElemLVal);
 
     // Store DATA_TYPE
     SpecInit.push_back(static_cast<llvm::Constant*>(TypeOfElement));
@@ -586,7 +588,6 @@ void CGApproxRuntimeGPU::CGApproxRuntimeEmitDataValues(CodeGenFunction &CGF) {
   QualType BoolTy = C.getIntTypeForBitwidth(8, false);
   // any way to have actual bool?
   auto &OMPRT = static_cast<CGOpenMPRuntimeGPU &>(CGF.CGM.getOpenMPRuntime());
-  Address InitCheck = *OMPRT.ApproxInitCheck;
 
   llvm::BasicBlock *CheckBody = CGF.createBasicBlock("approx.check_init");
   llvm::BasicBlock *StoreBody = CGF.createBasicBlock("approx.init_vars");
@@ -618,7 +619,7 @@ void CGApproxRuntimeGPU::CGApproxRuntimeEmitDataValues(CodeGenFunction &CGF) {
   sprintf(namePtr, ".dep.approx_opt_ptr.arr.addr_%d", output_arrays);
   ArrayOptPtrBase = declarePtrArrays(CGF, Outputs, namePtr);
 
-  llvm::Value *InitCheckValue = CGF.EmitLoadOfScalar(getAddressofVarInAddressSpace(CGF, ApproxInit, BoolTy, clang::LangAS::cuda_shared),
+  llvm::Value *InitCheckValue = CGF.EmitLoadOfScalar(*ApproxInitAddress,
                                                      false, BoolTy, SourceLocation()
                                                      );
   approxRTParams[DevInitDone] = InitCheckValue;
@@ -646,7 +647,7 @@ void CGApproxRuntimeGPU::CGApproxRuntimeEmitDataValues(CodeGenFunction &CGF) {
     approxRTParams[DevDataSizeIn] = NumOfElements;
   }
 
-  // All approximation techniques require the output
+  // // All approximation techniques require the output
   sprintf(nameInfo, ".dep.approx_outputs.arr.addr_%d", output_arrays++);
   std::tie(NumOfElements, InfoAddress) =
     CGApproxRuntimeGPUEmitData(CGF, Outputs, *ArrayOptBase, nameInfo);

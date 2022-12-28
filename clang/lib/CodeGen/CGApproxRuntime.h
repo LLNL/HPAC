@@ -155,7 +155,7 @@ private:
 
   llvm::Value *approxRTParams[DEV_ARG_END];
   llvm::GlobalVariable *ApproxInit = nullptr;
-  Address ApproxInitAddress = Address(nullptr, nullptr, CharUnits::Zero());
+  std::unique_ptr<Address> ApproxInitAddress;
 
   // Function type of the runtime interface call.
   llvm::FunctionType *RTFnTy;

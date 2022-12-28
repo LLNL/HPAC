@@ -664,7 +664,7 @@ unsigned int tnum_in_table_with_max_dist(float max_dist)
 
 #ifdef TAF_INTER
 __attribute__((always_inline))
-void __approx_device_memo_out(void (*accurateFN)(void *), void *arg, const void *region_info_out, const void *opt_access, void **outputs, const int nOutputs, const char init_done)
+void __approx_device_memo_out(void (*accurateFN)(void *), void *arg, const void *region_info_out, const void *opt_access, void **outputs, const int nOutputs, const bool init_done)
 {
   const approx_region_specification *out_reg = (const approx_region_specification*) region_info_out;
   approx_var_access_t *opts = (approx_var_access_t*) opt_access;
@@ -845,7 +845,7 @@ void __approx_device_memo_out(void (*accurateFN)(void *), void *arg, const void 
 #else
 
 __attribute__((always_inline))
-void __approx_device_memo_out(void (*accurateFN)(void *), void *arg, const void *region_info_out, const void *opt_access, void **outputs, const int nOutputs, const char init_done)
+void __approx_device_memo_out(void (*accurateFN)(void *), void *arg, const void *region_info_out, const void *opt_access, void **outputs, const int nOutputs, const bool init_done)
 {
   const approx_region_specification *out_reg = (const approx_region_specification*) region_info_out;
   constexpr int TAF_REGIONS_PER_WARP = NTHREADS_PER_WARP/TAF_THREAD_WIDTH;
@@ -1044,7 +1044,7 @@ void __approx_device_memo_out(void (*accurateFN)(void *), void *arg, const void 
 #endif //TAF_INTER
 
 __attribute__((always_inline))
-void __approx_device_memo_in(void (*accurateFN)(void *), void *arg, const void *region_info_in, const void *ipt_access, const void **inputs, const int nInputs, const void *region_info_out, const void *opt_access, void **outputs, const int nOutputs)
+void __approx_device_memo_in(void (*accurateFN)(void *), void *arg, const void *region_info_in, const void *ipt_access, const void **inputs, const int nInputs, const void *region_info_out, const void *opt_access, void **outputs, const int nOutputs, const bool init_done)
 {
   if(perfoFN)
     {
@@ -1085,13 +1085,20 @@ void __approx_device_memo_in(void (*accurateFN)(void *), void *arg, const void *
   #pragma omp allocate(ipt_table) allocator(omp_pteam_mem_alloc)
   int n_sm_vals = SM_SZ_IN_BYTES/4;
 
+  if(!init_done)
+    {
+      for(int i = omp_get_thread_num(); i < n_sm_vals; i+=omp_get_num_threads())
+        {
+          ipt_table[i] = 0;
+        }
+    }
+  intr::syncThreadsAligned();
+
   MemoTable<real_t, SM_SZ_IN_BYTES, NTHREADS_PER_WARP, TABLES_PER_WARP> _ipt_table{*RTEnvd.tabNumEntries, ipt_table,
                                                                                    n_input_values, RTEnvd.inputIdx, RTEnvd.ClockIndexes,
                                                                                    RTEnvd.ReplacementData, RTEnvd.TableRP
   };
 
-  intr::syncThreadsAligned();
-  _ipt_table.copy_from(RTEnvd.iTable + gmem_start);
   intr::syncThreadsAligned();
 
   int offset = 0;
@@ -1111,6 +1118,7 @@ void __approx_device_memo_in(void (*accurateFN)(void *), void *arg, const void *
 
       dist_total /= n_input_values;
       my_max_dist = max(my_max_dist, dist_total);
+
       // TODO: is divergence an issue?
       if(dist_total < *RTEnvd.threshold)
         {
@@ -1118,6 +1126,7 @@ void __approx_device_memo_in(void (*accurateFN)(void *), void *arg, const void *
           break;
         }
     }
+
 
   // every thread needs to participate because we use butterfly reduction
   // that requires power of 2 participation
@@ -1138,8 +1147,10 @@ void __approx_device_memo_in(void (*accurateFN)(void *), void *arg, const void *
 
   }
 
+
   if(entry_index != -1 && dist_total < *RTEnvd.threshold)
     {
+
       offset = 0;
       for(int j = 0; j < nOutputs; j++)
         {
@@ -1169,6 +1180,7 @@ void __approx_device_memo_in(void (*accurateFN)(void *), void *arg, const void *
       #ifdef APPROX_DEV_STATS
       RTEnvd.approx_count[tid_global] += 1;
       #endif // APPROX_DEV_STATS
+
     }
   else
     {
@@ -1205,6 +1217,7 @@ void __approx_device_memo_in(void (*accurateFN)(void *), void *arg, const void *
               int table_number = warp_in_block * TABLES_PER_WARP + table_in_warp;
 
               entry_index = max(RTEnvd.inputIdx[tables_per_block * omp_get_team_num() + table_number]-1, 0);
+
               int row_number = entry_index * n_output_values + offset + i;
               int access_idx = (row_number * tables_per_block) + table_number;
 
@@ -1220,9 +1233,9 @@ void __approx_device_memo_in(void (*accurateFN)(void *), void *arg, const void *
       }
     }
 
+
   // race condition between writer thread that has max dist and other threads
   intr::syncThreadsAligned();
-  _ipt_table.copy_to(RTEnvd.iTable+gmem_start);
 }
 
 __attribute__((always_inline))
@@ -1230,7 +1243,7 @@ void __approx_device_memo(void (*accurateFN)(void *), void *arg, int memo_type, 
 {
   if(memo_type == MEMO_IN)
     {
-      __approx_device_memo_in(accurateFN, arg, region_info_in, ipt_access, inputs, nInputs, region_info_out, opt_access, outputs, nOutputs);
+      __approx_device_memo_in(accurateFN, arg, region_info_in, ipt_access, inputs, nInputs, region_info_out, opt_access, outputs, nOutputs, init_done);
     }
   else if(memo_type == MEMO_OUT)
     {
