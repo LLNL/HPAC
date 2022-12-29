@@ -684,16 +684,17 @@ void __approx_device_memo_out(void (*accurateFN)(void *), void *arg, const void 
   char states [32];
   char cur_index [32];
   char active_values[32];
-  real_t output_table[32*8];
+  real_t _output_table[SM_SZ_IN_BYTES/4];
   #pragma omp allocate(states) allocator(omp_pteam_mem_alloc)
   #pragma omp allocate(cur_index) allocator(omp_pteam_mem_alloc)
   #pragma omp allocate(active_values) allocator(omp_pteam_mem_alloc)
-  #pragma omp allocate(output_table) allocator(omp_pteam_mem_alloc)
+  #pragma omp allocate(_output_table) allocator(omp_pteam_mem_alloc)
 
   int warpId = omp_get_thread_num() / NTHREADS_PER_WARP;
   int threadInWarp = omp_get_thread_num () % NTHREADS_PER_WARP;
+  int sm_offset = threadInWarp * MAX_HIST_SIZE * n_output_values;
+  real_t *output_table = _output_table + sm_offset;
 
-  syncThreadsAligned();
   if(!init_done)
     {
 
@@ -704,7 +705,7 @@ void __approx_device_memo_out(void (*accurateFN)(void *), void *arg, const void 
       output_table[threadInWarp] = 0;
     }
 
-  syncThreadsAligned();
+  intr::syncThreadsAligned();
 
   // NOTE: we will use predicted and active values as the same when the translation is done
   for(int h = 0; h < omp_get_num_threads() / NTHREADS_PER_WARP; h++)
@@ -715,9 +716,9 @@ void __approx_device_memo_out(void (*accurateFN)(void *), void *arg, const void 
           if(am_approx)
             {
               // we subtract one because 'cur_index' is the insertion point -- we want the last value inserted
-              int k =cur_index[threadInWarp] - 1;
+              int k = (cur_index[threadInWarp] - 1) * n_output_values;
               if(k<0)
-                k=(*RTEnvdOpt.history_size)-1;
+                k=((*RTEnvdOpt.history_size)-1) * n_output_values;
               offset = 0;
 
               for(int j = 0; j < nOutputs; j++)
@@ -725,10 +726,7 @@ void __approx_device_memo_out(void (*accurateFN)(void *), void *arg, const void 
                   for(int i = 0; i < opts[j].num_elem; i++)
                     {
                       // TODO: access index
-                      size_t row_num = (k*n_output_values) + offset + i;
-                      size_t col_num = threadInWarp;
-                      size_t access_index = (row_num * NTHREADS_PER_WARP) + col_num;
-
+                      size_t access_index = k+offset+i;
                       convertFromSingleWithOffset(outputs[j], output_table, i, access_index,
                                                   (ApproxType) out_reg[j].data_type);
 
@@ -740,32 +738,24 @@ void __approx_device_memo_out(void (*accurateFN)(void *), void *arg, const void 
               if (--active_values[threadInWarp] == 0) {
                 states[threadInWarp] = ACCURATE;
               }
-
-              // copy output
-              // decrement counter
-              // update state?
             }
           else
             {
               accurateFN(arg);
-
-              int k = cur_index[threadInWarp];
+              int k = cur_index[threadInWarp] * n_output_values;
               offset = 0;
               for(int j = 0; j < nOutputs; j++)
                 {
                   for(int i = 0; i < opts[j].num_elem; i++)
                     {
-                      size_t row_num = (k*n_output_values) + offset + i;
-                      size_t col_num = threadInWarp;
-                      size_t access_index = (row_num * NTHREADS_PER_WARP) + col_num;
-
+                      size_t access_index = k+offset+i;
                       convertToSingleWithOffset(output_table, outputs[j], access_index, i,
                                                 (ApproxType) out_reg[j].data_type);
 
                     }
                   offset += opts[j].num_elem;
                 }
-              cur_index[threadInWarp] = (k+1) % (*RTEnvdOpt.history_size);
+              cur_index[threadInWarp] = (cur_index[threadInWarp]+1) % (*RTEnvdOpt.history_size);
               active_values[threadInWarp]++;
             }
 
@@ -774,19 +764,15 @@ void __approx_device_memo_out(void (*accurateFN)(void *), void *arg, const void 
               real_t variance = 0.0;
               real_t avg = 0.0;
 
-              for(int k = 0; k < *RTEnvdOpt.history_size; k++)
+              for(int k = 0; k < *RTEnvdOpt.history_size*n_output_values; k += n_output_values)
                 {
                   offset = 0;
                   for(int j = 0; j < nOutputs; j++)
                     {
                       for(int i = 0; i < opts[j].num_elem; i++)
                         {
-                          size_t row_num = (k*n_output_values) + offset + i;
-                          size_t col_num = threadInWarp;
-                          size_t access_index = (row_num * NTHREADS_PER_WARP) + col_num;
-
+                          size_t access_index = k+offset+i;
                           avg += output_table[access_index];
-
                         }
                       offset += opts[j].num_elem;
                     }
@@ -801,16 +787,14 @@ void __approx_device_memo_out(void (*accurateFN)(void *), void *arg, const void 
               // variance += temp^2
 
 
-              for(int k = 0; k < *RTEnvdOpt.history_size; k++)
+              for(int k = 0; k < *RTEnvdOpt.history_size*n_output_values; k += n_output_values)
                 {
                   offset = 0;
                   for(int j = 0; j < nOutputs; j++)
                     {
                       for(int i = 0; i < opts[j].num_elem; i++)
                         {
-                          size_t row_num = (k*n_output_values) + offset + i;
-                          size_t col_num = threadInWarp;
-                          size_t access_index = (row_num * NTHREADS_PER_WARP) + col_num;
+                          size_t access_index = k+offset+i;
 
                           real_t tmp = output_table[access_index] - avg;
                           variance += tmp*tmp;
@@ -839,7 +823,7 @@ void __approx_device_memo_out(void (*accurateFN)(void *), void *arg, const void 
             }
         }
 
-      syncThreadsAligned();
+      intr::syncThreadsAligned();
     }
 }
 #else
@@ -849,7 +833,6 @@ void __approx_device_memo_out(void (*accurateFN)(void *), void *arg, const void 
 {
   const approx_region_specification *out_reg = (const approx_region_specification*) region_info_out;
   constexpr int TAF_REGIONS_PER_WARP = NTHREADS_PER_WARP/TAF_THREAD_WIDTH;
-  constexpr int MAX_HIST_SIZE = 5;
   approx_var_access_t *opts = (approx_var_access_t*) opt_access;
   int tid_global = omp_get_thread_num() + omp_get_team_num() * omp_get_num_threads();
   int entry_index = -1;
@@ -888,7 +871,6 @@ void __approx_device_memo_out(void (*accurateFN)(void *), void *arg, const void 
   // TODO: again a problem if history size is not width
   sm_offset = warpId * MAX_HIST_SIZE*NTHREADS_PER_WARP * n_output_values;
   real_t *output_table = _output_table + (sm_offset) + MAX_HIST_SIZE*sublaneInWarp*TAF_THREAD_WIDTH*n_output_values;
-  int my_table_start = sm_offset + MAX_HIST_SIZE*sublaneInWarp*TAF_THREAD_WIDTH;
 
   const unsigned int myMask = TAF_THREAD_WIDTH == NTHREADS_PER_WARP ? FULL_MASK : getMask(1, TAF_THREAD_WIDTH) << (TAF_THREAD_WIDTH*sublaneInWarp);
 
