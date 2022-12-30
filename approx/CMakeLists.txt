@@ -38,7 +38,12 @@ else()
   add_compile_definitions(TAF_INTRA=1)
 endif()
 
-add_compile_definitions(MAX_HIST_SIZE=5)
+option(MAX_HIST_SIZE "Maximum history size allowed for TAF. Affects amount of shared/global memory used")
+if(MAX_HIST_SIZE)
+  add_compile_definitions(MAX_HIST_SIZE=${MAX_HIST_SIZE})
+else()
+  add_compile_definitions(MAX_HIST_SIZE=5)
+endif()
 
 option(GLOBAL_OUTTABLE "Turn on if the table for output memoization should be in global memory")
 if(GLOBAL_OUTTABLE)
