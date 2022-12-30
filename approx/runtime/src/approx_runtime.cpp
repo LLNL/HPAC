@@ -688,7 +688,11 @@ void __approx_device_memo_out(void (*accurateFN)(void *), void *arg, const void 
   #pragma omp allocate(states) allocator(omp_pteam_mem_alloc)
   #pragma omp allocate(cur_index) allocator(omp_pteam_mem_alloc)
   #pragma omp allocate(active_values) allocator(omp_pteam_mem_alloc)
+  #ifdef OTABLE_GLOBAL
+  #pragma omp allocate(_output_table) allocator(omp_cgroup_mem_alloc)
+  #else
   #pragma omp allocate(_output_table) allocator(omp_pteam_mem_alloc)
+  #endif
 
   int warpId = omp_get_thread_num() / NTHREADS_PER_WARP;
   int threadInWarp = omp_get_thread_num () % NTHREADS_PER_WARP;
@@ -858,7 +862,12 @@ void __approx_device_memo_out(void (*accurateFN)(void *), void *arg, const void 
   #pragma omp allocate(_states) allocator(omp_pteam_mem_alloc)
   #pragma omp allocate(_cur_index) allocator(omp_pteam_mem_alloc)
   #pragma omp allocate(_active_values) allocator(omp_pteam_mem_alloc)
+  #ifdef OTABLE_GLOBAL
+  #pragma omp allocate(_output_table) allocator(omp_cgroup_mem_alloc)
+  #else
   #pragma omp allocate(_output_table) allocator(omp_pteam_mem_alloc)
+  #endif
+
 
   const int warpId = omp_get_thread_num() / NTHREADS_PER_WARP;
   const int sublaneInWarp = (omp_get_thread_num () % NTHREADS_PER_WARP) / TAF_THREAD_WIDTH;

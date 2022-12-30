@@ -38,7 +38,12 @@ else()
   add_compile_definitions(TAF_INTRA=1)
 endif()
 
+add_compile_definitions(MAX_HIST_SIZE=5)
 
+option(GLOBAL_OUTTABLE "Turn on if the table for output memoization should be in global memory")
+if(GLOBAL_OUTTABLE)
+  add_compile_definitions(OTABLE_GLOBAL=1)
+endif()
 
 option(TAF_WIDTH "Number of adjacent threads per warp that will share TAF state. Must be a power of 2 at most 32.")
 if(TAF_WIDTH)
@@ -46,7 +51,6 @@ if(TAF_WIDTH)
 else()
   add_compile_definitions(TAF_THREAD_WIDTH=32)
 endif()
-
 
 option(TABLES_PER_WARP "Number of memoization input tables to store for each warp.")
 if(TABLES_PER_WARP)
