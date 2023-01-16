@@ -2200,11 +2200,12 @@ ApproxClause *Sema::ActOnApproxLabelClause(ClauseKind Kind, ApproxVarListLocTy &
 
 ApproxClause *Sema::ActOnApproxMemoClause(ClauseKind Kind,
                                           MemoType MType,
+                                          DecisionHierarchyType DType,
                                           ApproxVarListLocTy &Locs) {
   SourceLocation StartLoc = Locs.StartLoc;
   SourceLocation LParenLoc = Locs.LParenLoc;
   SourceLocation EndLoc = Locs.EndLoc;
-  return new (Context) ApproxMemoClause(MType, StartLoc, EndLoc, LParenLoc);
+  return new (Context) ApproxMemoClause(MType, DType, StartLoc, EndLoc, LParenLoc);
 }
 
 ApproxClause *Sema::ActOnApproxDTClause(ClauseKind Kind,

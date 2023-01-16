@@ -12,6 +12,7 @@
 
 #include "clang/AST/ApproxClause.h"
 #include "clang/Basic/Approx.h"
+#include "clang/Basic/TokenKinds.h"
 #include "clang/Parse/ParseDiagnostic.h"
 #include "clang/Parse/Parser.h"
 #include "clang/Parse/RAIIObjectsForParser.h"
@@ -43,6 +44,19 @@ static bool isMemoType(Token &Tok, MemoType &Kind) {
     }
   }
   return false;
+}
+
+static bool getDecisionHierarchy(Token &Tok, DecisionHierarchyType &Kind) {
+  for (unsigned i = DTH_START; i < DTH_END; i++) {
+    enum DecisionHierarchyType DHT = (enum DecisionHierarchyType)i;
+    Kind = DHT;
+    if (Tok.getIdentifierInfo()->getName().equals(ApproxClause::ApproxDecisionHierarchy[DHT])) {
+      llvm::dbgs() << ApproxClause::ApproxDecisionHierarchy[DHT] << "\n";
+      return true;
+    }
+  }
+  return false;
+
 }
 
 bool Parser::ParseApproxVarList(SmallVectorImpl<Expr *> &Vars,
@@ -123,11 +137,24 @@ ApproxClause *Parser::ParseApproxMemoClause(ClauseKind CK) {
   /// Consume Memo Type
   ConsumeAnyToken();
 
+  DecisionHierarchyType DHT = DecisionHierarchyType::DTH_THREAD;
+  if(Tok.is(tok::colon))
+    {
+      // consume the colon
+      ConsumeAnyToken();
+
+      if(!getDecisionHierarchy(Tok, DHT)){
+        return nullptr;
+      }
+
+      ConsumeAnyToken();
+    }
+
   SourceLocation ELoc = Tok.getLocation();
   if (!T.consumeClose())
     ELoc = T.getCloseLocation();
   ApproxVarListLocTy Locs(Loc, LParenLoc, ELoc);
-  return Actions.ActOnApproxMemoClause(CK, MT, Locs);
+  return Actions.ActOnApproxMemoClause(CK, MT, DHT, Locs);
 }
 
 ApproxClause *Parser::ParseApproxDTClause(ClauseKind CK) {

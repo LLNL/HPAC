@@ -11290,7 +11290,9 @@ public:
 
   ApproxClause* ActOnApproxMemoClause(approx::ClauseKind Kind,
                                       approx::MemoType MType,
+                                      approx::DecisionHierarchyType DType,
                                       approx::ApproxVarListLocTy &Locs);
+
   ApproxClause* ActOnApproxDTClause(approx::ClauseKind Kind, approx::ApproxVarListLocTy &Locs);
   ApproxClause* ActOnApproxNNClause(approx::ClauseKind Kind, approx::ApproxVarListLocTy &Locs);
   ApproxClause* ActOnApproxUserClause(approx::ClauseKind Kind, approx::ApproxVarListLocTy &Locs);

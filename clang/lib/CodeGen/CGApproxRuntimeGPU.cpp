@@ -252,6 +252,7 @@ CGApproxRuntimeGPU::CGApproxRuntimeGPU(CodeGenModule &CGM)
                                            /* Orig. fn ptr*/ llvm::PointerType::getUnqual(CallbackFnTy),
                                            /* Perfo fn ptr*/ llvm::PointerType::getUnqual(CallbackFnTy),
                                            /* Captured data ptr*/ CGM.VoidPtrTy,
+                                           /* Decision Hierarchy Type */ CGM.Int32Ty,
                                            /* Memoization Type */ CGM.Int32Ty,
                                            /* Input Data Descr. */ CGM.VoidPtrTy,
                                            /* Input Access Descr. */ CGM.VoidPtrTy,
@@ -314,6 +315,8 @@ void CGApproxRuntimeGPU::CGApproxRuntimeEnterRegion(CodeGenFunction &CGF,
   approxRTParams[DevDataPtrOut] = llvm::ConstantPointerNull::get(CGM.VoidPtrTy);
   approxRTParams[DevDataSizeOut] =
       llvm::ConstantInt::get(CGF.Builder.getInt32Ty(), 0);
+  approxRTParams[DevDecisionDescr] =
+    llvm::ConstantInt::get(CGF.Builder.getInt32Ty(), 0);
   approxRTParams[DevMemoDescr] =
       llvm::ConstantInt::get(CGF.Builder.getInt32Ty(), 0);
 
@@ -358,6 +361,21 @@ void CGApproxRuntimeGPU::CGApproxRuntimeEmitMemoInit(
         llvm::ConstantInt::get(CGF.Builder.getInt32Ty(), 2);
       break;
     }
+
+  switch(MemoClause.getDecisionHierarchyType()) {
+    case approx::DTH_THREAD:
+      approxRTParams[DevDecisionDescr] =
+        llvm::ConstantInt::get(CGF.Builder.getInt32Ty(), 1);
+      break;
+    case approx::DTH_WARP:
+      approxRTParams[DevDecisionDescr] =
+        llvm::ConstantInt::get(CGF.Builder.getInt32Ty(), 2);
+      break;
+    case approx::DTH_BLOCK:
+      approxRTParams[DevDecisionDescr] =
+        llvm::ConstantInt::get(CGF.Builder.getInt32Ty(), 3);
+      break;
+  }
 }
 
 

@@ -48,6 +48,7 @@ protected:
 
 public:
   static const std::string Name[approx::CK_END];
+  static const std::string ApproxDecisionHierarchy[approx::DTH_END];
 
   SourceLocation getBeginLoc() const { return StartLoc; }
 
@@ -172,14 +173,16 @@ public:
 
 class ApproxMemoClause final : public ApproxClause {
   approx::MemoType Type;
+  approx::DecisionHierarchyType DecisionType;
   SourceLocation LParenLoc;
 public:
   static const std::string MemoName[approx::MT_END];
   /// \param StartLoc Starting location of the clause.
   /// \param EndLoc Ending location of the clause.
-  ApproxMemoClause(approx::MemoType MT, SourceLocation StartLoc,
+  ApproxMemoClause(approx::MemoType MT, approx::DecisionHierarchyType DHT,
+                   SourceLocation StartLoc,
                     SourceLocation EndLoc, SourceLocation LParenLoc)
-      :ApproxClause(approx::CK_MEMO, StartLoc, EndLoc), Type(MT), LParenLoc(LParenLoc){}
+    :ApproxClause(approx::CK_MEMO, StartLoc, EndLoc), Type(MT), DecisionType(DHT), LParenLoc(LParenLoc){}
 
   /// Build an empty clause.
   ApproxMemoClause()
@@ -205,8 +208,11 @@ public:
   }
 
   std::string getMemoTypeAsString() const {return MemoName[Type];}
+  std::string getDecisionHirarchyTypeAsString() const {return ApproxDecisionHierarchy[DecisionType];}
   approx::MemoType getMemoType() const {return Type;}
+  approx::DecisionHierarchyType getDecisionHierarchyType() const {return DecisionType;}
   void setMemoType(approx::MemoType T) {Type = T;}
+  void setDecisionHierarchyType(approx::DecisionHierarchyType T) {DecisionType = T;}
 };
 
 class ApproxDTClause final : public ApproxClause {

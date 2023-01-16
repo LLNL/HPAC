@@ -53,6 +53,7 @@ enum DevApproxRTArgsIndex : uint {
   DevAccurateFn = 0,
   DevPerfoFn,
   DevCapDataPtr,
+  DevDecisionDescr,
   DevMemoDescr,
   DevDataDescIn,
   DevAccessDescIn,

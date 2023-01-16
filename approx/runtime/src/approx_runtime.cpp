@@ -30,6 +30,8 @@
 #include "approx_device_memo_table.h"
 #include "device_intrinsics.h"
 
+#define APPROX_PARTICIPATION_THRESHOLD 0.5
+
 #define FULL_MASK 0xFFFFFFFF
 
 using namespace std;
@@ -37,6 +39,14 @@ using namespace approx;
 
 #define MEMO_IN 1
 #define MEMO_OUT 2
+
+#pragma omp declare target
+enum class DecisionHierarchy {
+  THREAD = 1,
+  WARP = 2,
+  BLOCK = 3
+};
+#pragma omp end declare target
 
 #define RAND_SIZE  10000
 
@@ -280,7 +290,6 @@ void resetDeviceOutputTable(float thresh, int num_output_items_per_entry, int pS
 
   if(output_mapped)
     {
-      printf("deleting the output table\n");
       // TODO: nthreads can be different here as well
       int del_gtab_size = nthreads * num_output_items_per_entry * *RTEnvdOpt.history_size;
 #pragma omp target exit data map(delete:RTEnvdOpt, RTEnvdOpt.states[0:nthreads], RTEnvdOpt.predicted_values[0:nthreads], RTEnvdOpt.pSize[0:1], RTEnvdOpt.oTable[0:del_gtab_size], RTEnvdOpt.threshold[0:1], RTEnvdOpt.history_size[0:1], RTEnvdOpt.window_size[0:1], RTEnvdOpt.active_values[0:nthreads], RTEnvdOpt.cur_index[0:nthreads])
@@ -662,9 +671,44 @@ unsigned int tnum_in_table_with_max_dist(float max_dist)
   return (firstThreadWithMax + table_number * threads_per_table) + (omp_get_num_threads() * omp_get_team_num());
 }
 
+bool makeApproxDecision(DecisionHierarchy T, bool local_decision)
+{
+  int n_participants_w = 0;
+  int n_participants_b[1];
+  bool am_participating = local_decision;
+  #pragma omp allocate(n_participants_b) allocator(omp_pteam_mem_alloc)
+
+  switch(T) {
+  case DecisionHierarchy::THREAD:
+    return am_participating;
+
+  case DecisionHierarchy::WARP:
+    n_participants_w = intr::popc(intr::warpBallot(FULL_MASK, am_participating));
+    return (n_participants_w / (float) NTHREADS_PER_WARP) >=
+      APPROX_PARTICIPATION_THRESHOLD;
+
+  case DecisionHierarchy::BLOCK:
+    if(omp_get_thread_num() == 0)
+      n_participants_b[0] = 0;
+    intr::syncThreadsAligned();
+
+    n_participants_w = intr::popc(intr::warpBallot(FULL_MASK, am_participating));
+
+    if(omp_get_thread_num() % NTHREADS_PER_WARP == 0)
+      {
+        #pragma omp atomic update
+        n_participants_b[0] += n_participants_w;
+      }
+    intr::syncThreadsAligned();
+
+    return (n_participants_b[0] / (float) omp_get_num_threads()) >=
+      APPROX_PARTICIPATION_THRESHOLD;
+  }
+}
+
 #ifdef TAF_INTER
 __attribute__((always_inline))
-void __approx_device_memo_out(void (*accurateFN)(void *), void *arg, const void *region_info_out, const void *opt_access, void **outputs, const int nOutputs, const bool init_done)
+void __approx_device_memo_out(void (*accurateFN)(void *), void *arg, const int decision_type, const void *region_info_out, const void *opt_access, void **outputs, const int nOutputs, const bool init_done)
 {
   const approx_region_specification *out_reg = (const approx_region_specification*) region_info_out;
   approx_var_access_t *opts = (approx_var_access_t*) opt_access;
@@ -816,9 +860,13 @@ void __approx_device_memo_out(void (*accurateFN)(void *), void *arg, const void 
               if(avg != 0.0f){
                 rsd = stdev / avg;
               }
-              if(rsd < 0.0) rsd = -rsd;
 
-              if(rsd < *RTEnvdOpt.threshold)
+              if(rsd < 0.0) rsd = -rsd;
+              bool shouldApproximate = makeApproxDecision(static_cast<DecisionHierarchy>(decision_type),
+                                                          rsd <= *RTEnvdOpt.threshold
+                                                          );
+
+              if(shouldApproximate)
                 {
                   // switch the machine state to approx
                   states[threadInWarp] = APPROX;
@@ -833,7 +881,7 @@ void __approx_device_memo_out(void (*accurateFN)(void *), void *arg, const void 
 #else
 
 __attribute__((always_inline))
-void __approx_device_memo_out(void (*accurateFN)(void *), void *arg, const void *region_info_out, const void *opt_access, void **outputs, const int nOutputs, const bool init_done)
+void __approx_device_memo_out(void (*accurateFN)(void *), void *arg, const int decision_type, const void *region_info_out, const void *opt_access, void **outputs, const int nOutputs, const bool init_done)
 {
   const approx_region_specification *out_reg = (const approx_region_specification*) region_info_out;
   constexpr int TAF_REGIONS_PER_WARP = NTHREADS_PER_WARP/TAF_THREAD_WIDTH;
@@ -1022,8 +1070,12 @@ void __approx_device_memo_out(void (*accurateFN)(void *), void *arg, const void 
       }
       if(rsd < 0.0) rsd = -rsd;
 
+      bool shouldApproximate = makeApproxDecision(static_cast<DecisionHierarchy>(decision_type),
+                                                  rsd <= *RTEnvdOpt.threshold
+                                                  );
+
       // No need to sync here: warp reductions sync threads identified by the mask
-      if(threadInSublane == 1 && rsd < *RTEnvdOpt.threshold)
+      if(threadInSublane == 0 && shouldApproximate)
         {
           // switch the machine state to approx
           states[sublaneInWarp] = APPROX;
@@ -1036,7 +1088,7 @@ void __approx_device_memo_out(void (*accurateFN)(void *), void *arg, const void 
 #endif //TAF_INTER
 
 __attribute__((always_inline))
-void __approx_device_memo_in(void (*accurateFN)(void *), void *arg, const void *region_info_in, const void *ipt_access, const void **inputs, const int nInputs, const void *region_info_out, const void *opt_access, void **outputs, const int nOutputs, const bool init_done)
+void __approx_device_memo_in(void (*accurateFN)(void *), void *arg, const int decision_type, const void *region_info_in, const void *ipt_access, const void **inputs, const int nInputs, const void *region_info_out, const void *opt_access, void **outputs, const int nOutputs, const bool init_done)
 {
   if(perfoFN)
     {
@@ -1139,8 +1191,12 @@ void __approx_device_memo_in(void (*accurateFN)(void *), void *arg, const void *
 
   }
 
+  bool shouldApproximate = makeApproxDecision(static_cast<DecisionHierarchy>(decision_type),
+                                              entry_index != -1 && dist_total <= *RTEnvd.threshold
+                                              );
 
-  if(entry_index != -1 && dist_total < *RTEnvd.threshold)
+
+  if(shouldApproximate)
     {
 
       offset = 0;
@@ -1235,11 +1291,11 @@ void __approx_device_memo(void (*accurateFN)(void *), void *arg, int memo_type, 
 {
   if(memo_type == MEMO_IN)
     {
-      __approx_device_memo_in(accurateFN, arg, region_info_in, ipt_access, inputs, nInputs, region_info_out, opt_access, outputs, nOutputs, init_done);
+      __approx_device_memo_in(accurateFN, arg, decision_type, region_info_in, ipt_access, inputs, nInputs, region_info_out, opt_access, outputs, nOutputs, init_done);
     }
   else if(memo_type == MEMO_OUT)
     {
-      __approx_device_memo_out(accurateFN, arg, region_info_out, opt_access, outputs, nOutputs, init_done);
+      __approx_device_memo_out(accurateFN, arg, decision_type, region_info_out, opt_access, outputs, nOutputs, init_done);
     }
   else
     {

@@ -30,6 +30,10 @@ const std::string ApproxPerfoClause::PerfoName[approx::PT_END] = {
 const std::string ApproxMemoClause::MemoName[approx::MT_END] = {
   "in", "out"};
 
+const std::string ApproxClause::ApproxDecisionHierarchy[approx::DTH_END] = {
+  "thread", "warp", "block"
+};
+
 ApproxInClause *ApproxInClause::Create(const ASTContext &C,
                                        SourceLocation StartLoc,
                                        SourceLocation LParenLoc,
@@ -87,7 +91,8 @@ void ApproxClausePrinter::VisitApproxPerfoClause(ApproxPerfoClause *Node) {
 }
 
 void ApproxClausePrinter::VisitApproxMemoClause(ApproxMemoClause *Node) {
-  OS << Node->getAsString() << "(" << Node->getMemoTypeAsString() << ") ";
+  OS << Node->getAsString() << "(" << Node->getMemoTypeAsString()
+     << ":" << Node->getDecisionHirarchyTypeAsString() << ") ";
 }
 
 void ApproxClausePrinter::VisitApproxDTClause(ApproxDTClause *Node) {

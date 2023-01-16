@@ -66,6 +66,15 @@ enum MemoType : uint {
 
 const unsigned MT_START = MT_IN;
 
+enum DecisionHierarchyType : uint {
+  DTH_THREAD = 0,
+  DTH_WARP,
+  DTH_BLOCK,
+  DTH_END
+};
+
+const unsigned DTH_START = DTH_THREAD;
+
 struct ApproxVarListLocTy {
   SourceLocation StartLoc;
   SourceLocation LParenLoc;
