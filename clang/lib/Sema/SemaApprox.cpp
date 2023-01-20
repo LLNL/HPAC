@@ -276,7 +276,7 @@ class ApproxIterationSpaceChecker {
   ///   UB  >  Var
   ///   UB  >= Var
   /// This will have no value when the condition is !=
-  llvm::Optional<bool> TestIsLessOp;
+  std::optional<bool> TestIsLessOp;
   /// This flag is true when condition is strict ( < or > ).
   bool TestIsStrictOp = false;
   /// This flag is true when step is subtracted on each iteration.
@@ -353,7 +353,7 @@ public:
   bool doesCondDependOnLC() const { return CondDependOnLC.hasValue(); }
   /// Returns index of the loop we depend on (starting from 1), or 0 otherwise.
   unsigned getLoopDependentIdx() const {
-    return InitDependOnLC.getValueOr(CondDependOnLC.getValueOr(0));
+    return InitDependOnLC.value_or(CondDependOnLC.value_or(0));
   }
 
 private:
@@ -364,7 +364,7 @@ private:
   bool setLCDeclAndLB(ValueDecl *NewLCDecl, Expr *NewDeclRefExpr, Expr *NewLB,
                       bool EmitDiags);
   /// Helper to set upper bound.
-  bool setUB(Expr *NewUB, llvm::Optional<bool> LessOp, bool StrictOp,
+  bool setUB(Expr *NewUB, std::optional<bool> LessOp, bool StrictOp,
              SourceRange SR, SourceLocation SL);
   /// Helper to set loop increment.
   bool setStep(Expr *NewStep, bool Subtract);
@@ -405,7 +405,7 @@ bool ApproxIterationSpaceChecker::dependent() const {
 }
 
 bool ApproxIterationSpaceChecker::setUB(Expr *NewUB,
-                                        llvm::Optional<bool> LessOp,
+                                        std::optional<bool> LessOp,
                                         bool StrictOp, SourceRange SR,
                                         SourceLocation SL) {
   // State consistency checking to ensure correct usage.
@@ -451,7 +451,7 @@ bool ApproxIterationSpaceChecker::setStep(Expr *NewStep, bool Subtract) {
     llvm::APSInt Result;
     bool IsConstant = NewStep->isIntegerConstantExpr(SemaRef.Context);
     if(IsConstant)
-      Result = NewStep->getIntegerConstantExpr(SemaRef.Context).getValue();
+      Result = NewStep->getIntegerConstantExpr(SemaRef.Context).value();
     bool IsUnsigned = !NewStep->getType()->hasSignedIntegerRepresentation();
     bool IsConstNeg =
         IsConstant && Result.isSigned() && (Subtract != Result.isNegative());
@@ -463,18 +463,18 @@ bool ApproxIterationSpaceChecker::setStep(Expr *NewStep, bool Subtract) {
     if (!TestIsLessOp.hasValue())
       TestIsLessOp = IsConstPos || (IsUnsigned && !Subtract);
     if (UB && (IsConstZero ||
-               (TestIsLessOp.getValue() ?
+               (TestIsLessOp.value() ?
                   (IsConstNeg || (IsUnsigned && Subtract)) :
                   (IsConstPos || (IsUnsigned && !Subtract))))) {
       SemaRef.Diag(NewStep->getExprLoc(),
                    diag::err_omp_loop_incr_not_compatible)
-          << LCDecl << TestIsLessOp.getValue() << NewStep->getSourceRange();
+          << LCDecl << TestIsLessOp.value() << NewStep->getSourceRange();
       SemaRef.Diag(ConditionLoc,
                    diag::note_omp_loop_cond_requres_compatible_incr)
-          << TestIsLessOp.getValue() << ConditionSrcRange;
+          << TestIsLessOp.value() << ConditionSrcRange;
       return true;
     }
-    if (TestIsLessOp.getValue() == Subtract) {
+    if (TestIsLessOp.value() == Subtract) {
       NewStep =
           SemaRef.CreateBuiltinUnaryOp(NewStep->getExprLoc(), UO_Minus, NewStep)
               .get();
@@ -951,7 +951,7 @@ Expr *ApproxIterationSpaceChecker::buildPreCond(
 
   ExprResult CondExpr =
       SemaRef.BuildBinOp(S, DefaultLoc,
-                         TestIsLessOp.getValue() ?
+                         TestIsLessOp.value() ?
                            (TestIsStrictOp ? BO_LT : BO_LE) :
                            (TestIsStrictOp ? BO_GT : BO_GE),
                          NewLB.get(), NewUB.get());
@@ -996,7 +996,7 @@ static bool fitsInto(unsigned Bits, bool Signed, const Expr *E, Sema &SemaRef) {
   llvm::APSInt Result;
   if (E->isIntegerConstantExpr(SemaRef.Context))
     {
-      Result = E->getIntegerConstantExpr(SemaRef.Context).getValue();
+      Result = E->getIntegerConstantExpr(SemaRef.Context).value();
       return Signed ? Result.isSignedIntN(Bits) : Result.isIntN(Bits);
     }
   return false;
@@ -1015,10 +1015,10 @@ calculateNumIters(Sema &SemaRef, Scope *S, SourceLocation DefaultLoc,
   llvm::APSInt LRes, URes, SRes;
   bool IsLowerConst = Lower->isIntegerConstantExpr(SemaRef.Context);
   if(IsLowerConst)
-    LRes = Lower->getIntegerConstantExpr(SemaRef.Context).getValue();
+    LRes = Lower->getIntegerConstantExpr(SemaRef.Context).value();
   bool IsStepConst = Step->isIntegerConstantExpr(SemaRef.Context);
   if(IsStepConst)
-    SRes = Step->getIntegerConstantExpr(SemaRef.Context).getValue();
+    SRes = Step->getIntegerConstantExpr(SemaRef.Context).value();
   bool NoNeedToConvert = IsLowerConst && !RoundToStep &&
                          ((!TestIsStrictOp && LRes.isNonNegative()) ||
                           (TestIsStrictOp && LRes.isStrictlyPositive()));
@@ -1053,7 +1053,7 @@ calculateNumIters(Sema &SemaRef, Scope *S, SourceLocation DefaultLoc,
   }
   bool IsUpperConst = Upper->isIntegerConstantExpr(SemaRef.Context);
   if(IsUpperConst)
-    URes = Upper->getIntegerConstantExpr(SemaRef.Context).getValue();
+    URes = Upper->getIntegerConstantExpr(SemaRef.Context).value();
   if (NoNeedToConvert && IsLowerConst && IsUpperConst &&
       (!RoundToStep || IsStepConst)) {
     unsigned BW = LRes.getBitWidth() > URes.getBitWidth() ? LRes.getBitWidth()
@@ -1176,7 +1176,7 @@ Expr *ApproxIterationSpaceChecker::buildNumIterations(
     return nullptr;
   Expr *LBVal = LB;
   Expr *UBVal = UB;
-  // LB = TestIsLessOp.getValue() ? min(LB(MinVal), LB(MaxVal)) :
+  // LB = TestIsLessOp.value() ? min(LB(MinVal), LB(MaxVal)) :
   // max(LB(MinVal), LB(MaxVal))
   if (InitDependOnLC) {
     const LoopIterationSpace &IS = ResultIterSpace;
@@ -1235,7 +1235,7 @@ Expr *ApproxIterationSpaceChecker::buildNumIterations(
         tryBuildCapture(SemaRef, MinLessMaxRes.get(), Captures).get();
     if (!MinLessMax)
       return nullptr;
-    if (TestIsLessOp.getValue()) {
+    if (TestIsLessOp.value()) {
       // LB(MinVal) < LB(MaxVal) ? LB(MinVal) : LB(MaxVal) - min(LB(MinVal),
       // LB(MaxVal))
       ExprResult MinLB = SemaRef.ActOnConditionalOp(DefaultLoc, DefaultLoc,
@@ -1254,8 +1254,8 @@ Expr *ApproxIterationSpaceChecker::buildNumIterations(
     }
   }
 
-  Expr *UBExpr = TestIsLessOp.getValue() ? UBVal : LBVal;
-  Expr *LBExpr = TestIsLessOp.getValue() ? LBVal : UBVal;
+  Expr *UBExpr = TestIsLessOp.value() ? UBVal : LBVal;
+  Expr *LBExpr = TestIsLessOp.value() ? LBVal : UBVal;
   Expr *Upper = tryBuildCapture(SemaRef, UBExpr, Captures).get();
   Expr *Lower = tryBuildCapture(SemaRef, LBExpr, Captures).get();
   if (!Upper || !Lower)
@@ -1318,11 +1318,11 @@ std::pair<Expr *, Expr *> ApproxIterationSpaceChecker::buildMinMaxValues(
   // init value.
   Expr *MinExpr = nullptr;
   Expr *MaxExpr = nullptr;
-  Expr *LBExpr = TestIsLessOp.getValue() ? LB : UB;
-  Expr *UBExpr = TestIsLessOp.getValue() ? UB : LB;
-  bool LBNonRect = TestIsLessOp.getValue() ? InitDependOnLC.hasValue()
+  Expr *LBExpr = TestIsLessOp.value() ? LB : UB;
+  Expr *UBExpr = TestIsLessOp.value() ? UB : LB;
+  bool LBNonRect = TestIsLessOp.value() ? InitDependOnLC.hasValue()
                                            : CondDependOnLC.hasValue();
-  bool UBNonRect = TestIsLessOp.getValue() ? CondDependOnLC.hasValue()
+  bool UBNonRect = TestIsLessOp.value() ? CondDependOnLC.hasValue()
                                            : InitDependOnLC.hasValue();
   Expr *Lower =
       LBNonRect ? LBExpr : tryBuildCapture(SemaRef, LBExpr, Captures).get();
@@ -1331,7 +1331,7 @@ std::pair<Expr *, Expr *> ApproxIterationSpaceChecker::buildMinMaxValues(
   if (!Upper || !Lower)
     return std::make_pair(nullptr, nullptr);
 
-  if (TestIsLessOp.getValue())
+  if (TestIsLessOp.value())
     MinExpr = Lower;
   else
     MaxExpr = Upper;
@@ -1375,7 +1375,7 @@ std::pair<Expr *, Expr *> ApproxIterationSpaceChecker::buildMinMaxValues(
   if (!Diff.isUsable())
     return std::make_pair(nullptr, nullptr);
 
-  if (TestIsLessOp.getValue()) {
+  if (TestIsLessOp.value()) {
     // MinExpr = Lower;
     // MaxExpr = Lower + (((Upper - Lower [- 1]) / Step) * Step)
     Diff = SemaRef.BuildBinOp(
@@ -1407,7 +1407,7 @@ std::pair<Expr *, Expr *> ApproxIterationSpaceChecker::buildMinMaxValues(
   if (!Diff.isUsable())
     return std::make_pair(nullptr, nullptr);
 
-  if (TestIsLessOp.getValue())
+  if (TestIsLessOp.value())
     MaxExpr = Diff.get();
   else
     MinExpr = Diff.get();
@@ -1636,7 +1636,7 @@ static unsigned checkApproxLoop(Stmt *AStmt, Sema &SemaRef,
   bool IsConstant =
       LastIteration.get()->isIntegerConstantExpr(SemaRef.Context);
   if(IsConstant)
-    Result = LastIteration.get()->getIntegerConstantExpr(SemaRef.Context).getValue();
+    Result = LastIteration.get()->getIntegerConstantExpr(SemaRef.Context).value();
   ExprResult CalcLastIteration;
   if (!IsConstant) {
     ExprResult SaveRef =
