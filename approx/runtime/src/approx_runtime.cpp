@@ -708,7 +708,7 @@ bool makeApproxDecision(DecisionHierarchy T, bool local_decision)
 
 #ifdef TAF_INTER
 __attribute__((always_inline))
-void __approx_device_memo_out(void (*accurateFN)(void *), void *arg, const int decision_type, const void *region_info_out, const void *opt_access, void **outputs, const int nOutputs, const bool init_done)
+void __approx_device_memo_out(void (*accurateFN)(void *), void *arg, const int decision_type, const void *region_info_out, const void *opt_access, void **outputs, const int nOutputs, const char init_done)
 {
   const approx_region_specification *out_reg = (const approx_region_specification*) region_info_out;
   approx_var_access_t *opts = (approx_var_access_t*) opt_access;
@@ -863,7 +863,7 @@ void __approx_device_memo_out(void (*accurateFN)(void *), void *arg, const int d
 
               if(rsd < 0.0) rsd = -rsd;
               bool shouldApproximate = makeApproxDecision(static_cast<DecisionHierarchy>(decision_type),
-                                                          rsd <= *RTEnvdOpt.threshold
+                                                          rsd < *RTEnvdOpt.threshold
                                                           );
 
               if(shouldApproximate)
@@ -881,7 +881,7 @@ void __approx_device_memo_out(void (*accurateFN)(void *), void *arg, const int d
 #else
 
 __attribute__((always_inline))
-void __approx_device_memo_out(void (*accurateFN)(void *), void *arg, const int decision_type, const void *region_info_out, const void *opt_access, void **outputs, const int nOutputs, const bool init_done)
+void __approx_device_memo_out(void (*accurateFN)(void *), void *arg, const int decision_type, const void *region_info_out, const void *opt_access, void **outputs, const int nOutputs, const char init_done)
 {
   const approx_region_specification *out_reg = (const approx_region_specification*) region_info_out;
   constexpr int TAF_REGIONS_PER_WARP = NTHREADS_PER_WARP/TAF_THREAD_WIDTH;
@@ -1071,7 +1071,7 @@ void __approx_device_memo_out(void (*accurateFN)(void *), void *arg, const int d
       if(rsd < 0.0) rsd = -rsd;
 
       bool shouldApproximate = makeApproxDecision(static_cast<DecisionHierarchy>(decision_type),
-                                                  rsd <= *RTEnvdOpt.threshold
+                                                  rsd < *RTEnvdOpt.threshold
                                                   );
 
       // No need to sync here: warp reductions sync threads identified by the mask
@@ -1088,7 +1088,7 @@ void __approx_device_memo_out(void (*accurateFN)(void *), void *arg, const int d
 #endif //TAF_INTER
 
 __attribute__((always_inline))
-void __approx_device_memo_in(void (*accurateFN)(void *), void *arg, const int decision_type, const void *region_info_in, const void *ipt_access, const void **inputs, const int nInputs, const void *region_info_out, const void *opt_access, void **outputs, const int nOutputs, const bool init_done)
+void __approx_device_memo_in(void (*accurateFN)(void *), void *arg, const int decision_type, const void *region_info_in, const void *ipt_access, const void **inputs, const int nInputs, const void *region_info_out, const void *opt_access, void **outputs, const int nOutputs, const char init_done)
 {
   if(perfoFN)
     {
@@ -1287,7 +1287,7 @@ void __approx_device_memo_in(void (*accurateFN)(void *), void *arg, const int de
 }
 
 __attribute__((always_inline))
-void __approx_device_memo(void (*accurateFN)(void *), void *arg, int memo_type, const void *region_info_in, const void *ipt_access, const void **inputs, const int nInputs, const void *region_info_out, const void *opt_access, void **outputs, const int nOutputs, const char init_done)
+void __approx_device_exec_call(void (*accurateFN)(void *), void (*perfoFN)(void*), void *arg, int decision_type, int memo_type, const void *region_info_in, const void *ipt_access, const void **inputs, const int nInputs, const void *region_info_out, const void *opt_access, void **outputs, const int nOutputs, const char init_done)
 {
   if(memo_type == MEMO_IN)
     {
