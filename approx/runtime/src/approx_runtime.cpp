@@ -972,7 +972,7 @@ void __approx_device_memo_out(void (*accurateFN)(void *), void *arg, const int d
         }
 
 
-      syncWarp(myMask);
+      intr::syncWarp(myMask);
       if(threadInSublane == 0)
         {
           active_values[sublaneInWarp]--;
@@ -1002,7 +1002,7 @@ void __approx_device_memo_out(void (*accurateFN)(void *), void *arg, const int d
           offset += opts[j].num_elem;
         }
 
-      syncWarp(myMask);
+      intr::syncWarp(myMask);
       if(threadInSublane == 0)
         {
           cur_index[sublaneInWarp] = (cur_index[sublaneInWarp]+TAF_THREAD_WIDTH) % ((*RTEnvdOpt.history_size)* TAF_THREAD_WIDTH);
@@ -1010,7 +1010,7 @@ void __approx_device_memo_out(void (*accurateFN)(void *), void *arg, const int d
         }
     }
 
-  syncWarp(myMask);
+  intr::syncWarp(myMask);
 
   if(states[sublaneInWarp] == ACCURATE && active_values[sublaneInWarp] >= *RTEnvdOpt.history_size)
     {
@@ -1032,7 +1032,7 @@ void __approx_device_memo_out(void (*accurateFN)(void *), void *arg, const int d
               offset += opts[j].num_elem;
             }
         }
-      avg = reduceSumImpl(myMask, avg);
+      avg = intr::reduceSumImpl(myMask, avg);
 
       // average = sum / total_size
       avg /= (real_t) (*RTEnvdOpt.history_size * n_output_values * TAF_THREAD_WIDTH);
@@ -1060,7 +1060,7 @@ void __approx_device_memo_out(void (*accurateFN)(void *), void *arg, const int d
         }
 
       // variance /= total_size
-      variance = reduceSumImpl(myMask, variance);
+      variance = intr::reduceSumImpl(myMask, variance);
       variance /= (real_t)(*RTEnvdOpt.history_size * n_output_values * TAF_THREAD_WIDTH);
 
       real_t stdev = sqrt(variance);
@@ -1081,7 +1081,7 @@ void __approx_device_memo_out(void (*accurateFN)(void *), void *arg, const int d
           states[sublaneInWarp] = APPROX;
           active_values[sublaneInWarp] = *RTEnvdOpt.pSize;
         }
-      syncWarp(myMask);
+      intr::syncWarp(myMask);
     }
 }
 
@@ -1090,12 +1090,6 @@ void __approx_device_memo_out(void (*accurateFN)(void *), void *arg, const int d
 __attribute__((always_inline))
 void __approx_device_memo_in(void (*accurateFN)(void *), void *arg, const int decision_type, const void *region_info_in, const void *ipt_access, const void **inputs, const int nInputs, const void *region_info_out, const void *opt_access, void **outputs, const int nOutputs, const char init_done)
 {
-  if(perfoFN)
-    {
-      perfoFN(arg);
-      return;
-    }
-
   const approx_region_specification *in_reg = (const approx_region_specification*) region_info_in;
   const approx_region_specification *out_reg = (const approx_region_specification*) region_info_out;
   const approx_var_access_t *ipts = (approx_var_access_t*) ipt_access;
@@ -1289,18 +1283,20 @@ void __approx_device_memo_in(void (*accurateFN)(void *), void *arg, const int de
 __attribute__((always_inline))
 void __approx_device_exec_call(void (*accurateFN)(void *), void (*perfoFN)(void*), void *arg, int decision_type, int memo_type, const void *region_info_in, const void *ipt_access, const void **inputs, const int nInputs, const void *region_info_out, const void *opt_access, void **outputs, const int nOutputs, const char init_done)
 {
+  if(perfoFN)
+    {
+      perfoFN(arg);
+      return;
+    }
   if(memo_type == MEMO_IN)
     {
       __approx_device_memo_in(accurateFN, arg, decision_type, region_info_in, ipt_access, inputs, nInputs, region_info_out, opt_access, outputs, nOutputs, init_done);
     }
-  else if(memo_type == MEMO_OUT)
+  else
     {
       __approx_device_memo_out(accurateFN, arg, decision_type, region_info_out, opt_access, outputs, nOutputs, init_done);
     }
-  else
-    {
-      printf("ERROR: Incorrect memo type");
-    }
+
 }
 
 #pragma omp end declare target
