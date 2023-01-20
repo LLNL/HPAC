@@ -943,7 +943,7 @@ void __approx_device_memo_out(void (*accurateFN)(void *), void *arg, const int d
         }
     }
 
-  syncWarp(FULL_MASK);
+  intr::syncWarp(myMask);
 
   // NOTE: we will use predicted and active values as the same when the translation is done
   bool am_approx = states[sublaneInWarp] == APPROX;
