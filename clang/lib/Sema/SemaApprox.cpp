@@ -348,9 +348,9 @@ public:
   /// Return true if any expression is dependent.
   bool dependent() const;
   /// Returns true if the initializer forms non-rectangular loop.
-  bool doesInitDependOnLC() const { return InitDependOnLC.hasValue(); }
+  bool doesInitDependOnLC() const { return InitDependOnLC.has_value(); }
   /// Returns true if the condition forms non-rectangular loop.
-  bool doesCondDependOnLC() const { return CondDependOnLC.hasValue(); }
+  bool doesCondDependOnLC() const { return CondDependOnLC.has_value(); }
   /// Returns index of the loop we depend on (starting from 1), or 0 otherwise.
   unsigned getLoopDependentIdx() const {
     return InitDependOnLC.value_or(CondDependOnLC.value_or(0));
@@ -460,7 +460,7 @@ bool ApproxIterationSpaceChecker::setStep(Expr *NewStep, bool Subtract) {
     bool IsConstZero = IsConstant && !Result.getBoolValue();
 
     // != with increment is treated as <; != with decrement is treated as >
-    if (!TestIsLessOp.hasValue())
+    if (!TestIsLessOp.has_value())
       TestIsLessOp = IsConstPos || (IsUnsigned && !Subtract);
     if (UB && (IsConstZero ||
                (TestIsLessOp.value() ?
@@ -560,7 +560,7 @@ bool ApproxIterationSpaceChecker::checkAndSetCond(Expr *S) {
     } else if (IneqCondIsCanonical && BO->getOpcode() == BO_NE)
       return setUB(
           getInitLCDecl(BO->getLHS()) == LCDecl ? BO->getRHS() : BO->getLHS(),
-          /*LessOp=*/llvm::None,
+          /*LessOp=*/std::nullopt,
           /*StrictOp=*/true, BO->getSourceRange(), BO->getOperatorLoc());
   } else if (auto *CE = dyn_cast<CXXOperatorCallExpr>(S)) {
     if (CE->getNumArgs() == 2) {
@@ -583,7 +583,7 @@ bool ApproxIterationSpaceChecker::checkAndSetCond(Expr *S) {
         if (IneqCondIsCanonical)
           return setUB(getInitLCDecl(CE->getArg(0)) == LCDecl ? CE->getArg(1)
                                                               : CE->getArg(0),
-                       /*LessOp=*/llvm::None,
+                       /*LessOp=*/std::nullopt,
                        /*StrictOp=*/true, CE->getSourceRange(),
                        CE->getOperatorLoc());
         break;
@@ -1320,10 +1320,10 @@ std::pair<Expr *, Expr *> ApproxIterationSpaceChecker::buildMinMaxValues(
   Expr *MaxExpr = nullptr;
   Expr *LBExpr = TestIsLessOp.value() ? LB : UB;
   Expr *UBExpr = TestIsLessOp.value() ? UB : LB;
-  bool LBNonRect = TestIsLessOp.value() ? InitDependOnLC.hasValue()
-                                           : CondDependOnLC.hasValue();
-  bool UBNonRect = TestIsLessOp.value() ? CondDependOnLC.hasValue()
-                                           : InitDependOnLC.hasValue();
+  bool LBNonRect = TestIsLessOp.value() ? InitDependOnLC.has_value()
+                                           : CondDependOnLC.has_value();
+  bool UBNonRect = TestIsLessOp.value() ? CondDependOnLC.has_value()
+                                           : InitDependOnLC.has_value();
   Expr *Lower =
       LBNonRect ? LBExpr : tryBuildCapture(SemaRef, LBExpr, Captures).get();
   Expr *Upper =
