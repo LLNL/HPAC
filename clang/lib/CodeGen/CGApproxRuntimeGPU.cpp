@@ -262,7 +262,7 @@ CGApproxRuntimeGPU::CGApproxRuntimeGPU(CodeGenModule &CGM)
                                            /* Output Access Descr. */ CGM.VoidPtrTy,
                                            /* Output Data Pointers. */ CGM.VoidPtrTy,
                                            /* Output Data Num Elements */ CGM.Int32Ty,
-                                           /* Initialization done */ CGM.Int8Ty
+                                           /* Initialization done */ CGM.CharTy
                                          },
                                          false);
 }
@@ -294,7 +294,6 @@ void CGApproxRuntimeGPU::CGApproxRuntimeEnterRegion(CodeGenFunction &CGF,
   CodeGenFunction::CGCapturedStmtRAII CapInfoRAII(localCGF, &CGSI);
   llvm::Function *Fn = localCGF.GenerateCapturedStmtFunction(CS);
   Fn->addFnAttr(Attribute::AttrKind::AlwaysInline);
-  Fn->addFnAttr(Attribute::AttrKind::ArgMemOnly);
 
   /// Fill in parameters of runtime function call
   /// Put default values on everything.
