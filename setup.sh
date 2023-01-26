@@ -22,6 +22,7 @@ LIGHTCYAN='\033[1;36m'
 WHITE='\033[1;37m'
 
 clang_bin=$prefix/bin/clang
+#clang_bin=/dev/null
 #approx_runtime_lib=$prefix/lib/libapprox.so
 approx_runtime_lib=/dev/null
 
@@ -36,11 +37,14 @@ if [ ! -f $clang_bin ]; then
     -DCMAKE_EXPORT_COMPILE_COMMANDS='On'\
     -DCMAKE_BUILD_TYPE='RelWithDebInfo' \
     -DLLVM_FORCE_ENABLE_STATS='On' \
-    -DLLVM_ENABLE_PROJECTS='clang;openmp' \
+    -DLLVM_ENABLE_PROJECTS='clang' \
+    -DCMAKE_C_COMPILER=gcc \
+    -DCMAKE_CXX_COMPILER=g++ \
+    -DLLVM_ENABLE_RUNTIMES='openmp' \
     -DLLVM_OPTIMIZED_TABLEGEN='On' \
     -DCLANG_BUILD_EXAMPLES='On' \
     -DBUILD_SHARED_LIBS='On' \
-    -DLLVM_ENABLE_ASSERTIONS='Off' \
+    -DLLVM_ENABLE_ASSERTIONS='On' \
     ../llvm
 
     ninja -j $threads
@@ -53,6 +57,19 @@ if [ ! -f $clang_bin ]; then
     echo "export CPP=clang++" >> hpac_env.sh
 fi
 
+gpuarchsm=$(python3 approx/approx_utilities/detect_arch.py $prefix)
+gpuarch=$(echo $gpuarchsm | cut -d ';' -f 1)
+gpusm=$(echo $gpuarchsm | cut -d ';' -f 2)
+
+echo "export HPAC_GPU_ARCH=$gpuarch" >> hpac_env.sh
+echo "export HPAC_GPU_SM=$gpusm" >> hpac_env.sh
+
+if [ ! $? -eq 0 ]; then
+  echo "ERROR: No GPU architecture targets found, exiting..."
+  exit 1
+else
+  echo "Building for GPU architecture $gpuarch, compute capability $gpusm"
+fi
 source hpac_env.sh
 
 if [ ! -f $approx_runtime_lib ]; then
@@ -61,14 +78,23 @@ if [ ! -f $approx_runtime_lib ]; then
   CC=clang CPP=clang++ cmake -G Ninja \
       -DCMAKE_INSTALL_PREFIX=$prefix \
       -DLLVM_EXTERNAL_CLANG_SOURCE_DIR=${current_dir}/clang/ \
-      -DPACKAGE_VERSION=15.0.0 \
-	  -DLIBAPPROX_ENABLE_SHARED=0 \
-	  -DDEV_STATS=0 \
+      -DPACKAGE_VERSION=16 \
+      -DGPU_ARCH=$gpuarch \
+      -DGPU_SM=$gpusm \
+      -DLIBAPPROX_ENABLE_SHARED=0 \
+      -DDEV_STATS=0 \
+      -DSHARED_MEMORY_SIZE=1024 \
+      -DTABLES_PER_WARP=1 \
+      -DTAF_WIDTH=2 \
+      -DGLOBAL_OUTTABLE=0 \
+      -DTAF_TYPE=TAF_INTRA \
+      -DMAX_HIST_SIZE=1 \
      ../approx
     ninja -j $threads
     ninja -j $threads install
     popd
 fi
+exit
 pushd ./approx/approx_utilities/
 
 if [ ! -f 'original_src.tar.gz' ]; then
@@ -175,3 +201,4 @@ pushd build
 cmake ../
 make -j
 popd
+

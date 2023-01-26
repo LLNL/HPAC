@@ -10,7 +10,11 @@ set(CMAKE_BUILD_TYPE Release)
 set(CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake/;${CMAKE_MODULE_PATH}")
 
 find_package(OpenMP REQUIRED)
-set(OpenMP_CXX_FLAGS "${OpenMP_CXX_FLAGS} -Xopenmp-target -march=sm_86 -fopenmp-targets=nvptx64 -foffload-lto -g")
+
+set(GPU_ARCH "nvptx64" CACHE STRING "GPU vendor architecture to target. Current options include: 'nvptx64, amdgcn'") 
+set(GPU_SM "sm_70" CACHE STRING "GPU compute capability.") 
+message("Targeting ${GPU_ARCH} with compute capability: ${GPU_SM}")
+set(OpenMP_CXX_FLAGS "${OpenMP_CXX_FLAGS} -fopenmp-targets=${GPU_ARCH} -Xopenmp-target -march=${GPU_SM} -foffload-lto -g")
 
 if (OPENMP_FOUND)
     set (CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${OpenMP_C_FLAGS}")
@@ -96,5 +100,4 @@ set(APPROX_INSTALL_LIBDIR "lib${LLVM_LIBDIR_SUFFIX}")
 set(APPROX_LIBDIR_SUFFIX "" CACHE STRING
 "Suffix of lib installation directory, e.g. 64 => lib64")
 set(APPROX_INSTALL_LIBDIR "lib${APPROX_LIBDIR_SUFFIX}")
-
 add_subdirectory(runtime)
