@@ -68,7 +68,12 @@ else()
   add_compile_definitions(TABLES_PER_WARP=2)
 endif()
 
-add_compile_definitions(NTHREADS_PER_WARP=32)
+if(GPU_ARCH STREQUAL "amdgcn")
+  add_compile_definitions(NTHREADS_PER_WARP=64)
+else()
+  # nvptx
+  add_compile_definitions(NTHREADS_PER_WARP=32)
+endif()
 
 set(CMAKE_CXX_STANDARD 14 CACHE STRING "C++ standard to conform to")
 set(CMAKE_CXX_STANDARD_REQUIRED YES)

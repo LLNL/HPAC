@@ -230,8 +230,7 @@ private:
 
             row_number = entry_index * num_items_per_entry + offset + i;
             access_idx = (row_number * tables_per_block) + table_number;
-
-            convertToSingleWithOffset(table, inputs[j], access_idx, i*input_a[j].stride,
+            convertToSingleWithOffset(table, inputs[j], access_idx, i*input_a[0].stride,
                                       (ApproxType) rs[j].data_type);
 
             idx_offset = tables_per_block * omp_get_team_num() + table_number;

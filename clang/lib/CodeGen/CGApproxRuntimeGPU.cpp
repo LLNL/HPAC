@@ -30,7 +30,6 @@ using namespace clang;
 using namespace CodeGen;
 // FIXME: find out how to re-integrate convertToApproxType
 
-
 static int8_t convertToApproxType(const BuiltinType *T) {
   ApproxType approxType;
   switch (T->getKind()) {
@@ -432,17 +431,16 @@ void CGApproxRuntimeGPU::declareApproxInit(CodeGenFunction& CGF)
   llvm::Type *BoolMemTy = CGF.ConvertTypeForMem(BoolTy);
   std::string name = "approx_init";
 
-
   // Leak, but who cares
   ApproxInit = new GlobalVariable(CGM.getModule(), BoolMemTy, false, GlobalValue::InternalLinkage,
-                               llvm::Constant::getNullValue(BoolMemTy),
+			       llvm::UndefValue::get(BoolMemTy),
                                name,
                                /*InsertBefore=*/ nullptr,
                                /*ThreadLocalMode=*/ GlobalValue::NotThreadLocal,
                                // how do we do this better?
-                                  CGM.getContext().getTargetAddressSpace(clang::LangAS::cuda_shared)
+                                  CGM.getContext().getTargetAddressSpace(LangAS::cuda_shared)
                                );
-  ApproxInitAddress = std::make_unique<Address>(this->getAddressofVarInAddressSpace(CGF, ApproxInit, BoolTy, clang::LangAS::cuda_shared));
+  ApproxInitAddress = std::make_unique<Address>(this->getAddressofVarInAddressSpace(CGF, ApproxInit, BoolTy, LangAS::cuda_shared));
   CGF.EmitStoreOfScalar(llvm::ConstantInt::get(CGF.Int8Ty, 0, false), *ApproxInitAddress, false, BoolTy, AlignmentSource::Type, false, false);
 
 }
@@ -476,17 +474,17 @@ std::unique_ptr<Address> CGApproxRuntimeGPU::declareAccessArrays(CodeGenFunction
 
   // Leak, but who cares
   AccessInfo = new GlobalVariable(CGM.getModule(), MemType, false, GlobalValue::InternalLinkage,
-                                  llvm::Constant::getNullValue(MemType),
+				  llvm::UndefValue::get(MemType),
                                   name,
                                   /*InsertBefore=*/ nullptr,
                                   /*ThreadLocalMode=*/ GlobalValue::NotThreadLocal,
                                   // how do we do this better?
-                                  CGM.getContext().getTargetAddressSpace(clang::LangAS::cuda_shared)
+                                  CGM.getContext().getTargetAddressSpace(LangAS::cuda_shared)
                                   );
 
   return std::make_unique<Address>(
                  CGF.Builder.CreatePointerBitCastOrAddrSpaceCast(
-                 AccessInfo, MemType->getPointerTo(CGM.getContext().getTargetAddressSpace(clang::LangAS::cuda_shared))),
+                 AccessInfo, MemType->getPointerTo(CGM.getContext().getTargetAddressSpace(LangAS::cuda_shared))),
                  MemType, CGM.getContext().getPreferredTypeAlignInChars(VarPtrArrayTy));
 }
 

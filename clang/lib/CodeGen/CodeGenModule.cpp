@@ -221,6 +221,7 @@ void CodeGenModule::createApproxRuntime(){
   switch(getTriple().getArch()) {
   case llvm::Triple::nvptx:
   case llvm::Triple::nvptx64:
+  case llvm::Triple::amdgcn:
     llvm::dbgs() << "Creating approx runtime for the gpu\n";
     ApproxRuntime.reset(new CGApproxRuntimeGPU(*this));
     break;
