@@ -491,11 +491,13 @@ void pipelined_device_to_disk_sync(ml_argdesc_t &arg, internal_repr_metadata_t &
 
     auto region_addr = RTEnv.db->InstantiateRegion((uintptr_t) arg.accurateFN, arg.region_name);
     HDF5DB *db = static_cast<HDF5DB *>(RTEnv.db);
-
-    comp.recordStart();
-    arg.accurateFN(arg.accurateFN_arg);
-    comp.recordEnd();
-    db->RuntimeToDB(region_addr, comp.elapsedTime());
+    
+	if(!isInput) {
+        comp.recordStart();
+        arg.accurateFN(arg.accurateFN_arg);
+        comp.recordEnd();
+        db->RuntimeToDB(region_addr, comp.elapsedTime());
+	}
 
     TensorImpl::tensor_options_t tensor_options_pin = TensorImpl::tensor_options_t().dtype(TensorImpl::getTensorDataType(ipt)).device(TensorImpl::CPU).pinned_memory(true);
     TensorImpl::tensor_options_t tensor_options_no_pin = TensorImpl::tensor_options_t().dtype(TensorImpl::getTensorDataType(ipt)).device(TensorImpl::CPU);
