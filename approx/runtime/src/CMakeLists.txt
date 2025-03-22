@@ -38,7 +38,6 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(LIBAPPROX_LINKER_LANGUAGE C)
 find_package(Torch REQUIRED)
 set(CMAKE_CUDA_FLAGS "")
-set(CMAKE_CUDA_ARCHITECTURES 80)
 # link with openmp
 
 find_package(OpenMP)
