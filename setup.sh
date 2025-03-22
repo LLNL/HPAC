@@ -91,6 +91,7 @@ if [ ! -f $approx_runtime_lib ]; then
     -DCAFFE2_USE_CUDNN='On' \
       -DTorch_DIR=$torch_d \
       -DHDF5_Dir=$hdf5_d \
+      -DCMAKE_CUDA_ARCHITECTURES=${gpusm: -2} \
      ../approx
     ninja -j $threads
     ninja -j $threads install
